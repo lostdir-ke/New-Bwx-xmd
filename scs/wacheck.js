@@ -4,6 +4,75 @@
 const { adams } = require(__dirname + "/../Ibrahim/adams");
 const axios = require('axios');
 const fs = require('fs');
+const path = require('path');
+
+// Path for storing saved WhatsApp contacts
+const contactsStoragePath = path.join(__dirname, '../xmd/saved_whatsapp_contacts.json');
+
+// Initialize contacts storage if it doesn't exist
+if (!fs.existsSync(contactsStoragePath)) {
+    fs.writeFileSync(contactsStoragePath, JSON.stringify({
+        whatsappUsers: [],
+        nonWhatsappUsers: [],
+        lastUpdated: null
+    }, null, 2));
+}
+
+// Function to load saved contacts
+function loadSavedContacts() {
+    try {
+        return JSON.parse(fs.readFileSync(contactsStoragePath, 'utf8'));
+    } catch (error) {
+        console.error('Error loading saved contacts:', error);
+        return {
+            whatsappUsers: [],
+            nonWhatsappUsers: [],
+            lastUpdated: null
+        };
+    }
+}
+
+// Function to save contacts
+function saveContacts(whatsappUsers, nonWhatsappUsers) {
+    try {
+        const savedData = loadSavedContacts();
+        
+        // Merge new data with existing data, avoiding duplicates
+        const mergedWhatsappUsers = [...savedData.whatsappUsers];
+        const mergedNonWhatsappUsers = [...savedData.nonWhatsappUsers];
+        
+        // Add new WhatsApp users
+        whatsappUsers.forEach(newUser => {
+            const exists = mergedWhatsappUsers.some(user => user.phoneNumber === newUser.phoneNumber);
+            if (!exists) {
+                mergedWhatsappUsers.push(newUser);
+            }
+        });
+        
+        // Add new non-WhatsApp users
+        nonWhatsappUsers.forEach(newUser => {
+            const exists = mergedNonWhatsappUsers.some(user => user.phoneNumber === newUser.phoneNumber);
+            if (!exists) {
+                mergedNonWhatsappUsers.push(newUser);
+            }
+        });
+        
+        // Save updated data
+        fs.writeFileSync(contactsStoragePath, JSON.stringify({
+            whatsappUsers: mergedWhatsappUsers,
+            nonWhatsappUsers: mergedNonWhatsappUsers,
+            lastUpdated: new Date().toISOString()
+        }, null, 2));
+        
+        return {
+            whatsappCount: mergedWhatsappUsers.length,
+            nonWhatsappCount: mergedNonWhatsappUsers.length
+        };
+    } catch (error) {
+        console.error('Error saving contacts:', error);
+        return null;
+    }
+}
 
 adams({ nomCom: "wacheck", categorie: "General" }, async (dest, zk, commandeOptions) => {
     const { ms, repondre, arg } = commandeOptions;
@@ -51,11 +120,19 @@ adams({ nomCom: "wacheck", categorie: "General" }, async (dest, zk, commandeOpti
             const [result] = await zk.onWhatsApp(phoneNumber + '@s.whatsapp.net');
             
             if (result && result.exists) {
+                // Save the contact
+                const name = `Contact (${new Date().toLocaleString()})`;
+                saveContacts([{ name, phoneNumber }], []);
+                
                 // Send success message with the JID information
-                return repondre(`✅ *Number Check Result*\n\n• Number: *${phoneNumber}*\n• Status: *Registered on WhatsApp*\n• JID: *${result.jid}*`);
+                return repondre(`✅ *Number Check Result*\n\n• Number: *${phoneNumber}*\n• Status: *Registered on WhatsApp*\n• JID: *${result.jid}*\n\n_This number has been saved for reference._`);
             } else {
+                // Save the non-WhatsApp contact
+                const name = `Contact (${new Date().toLocaleString()})`;
+                saveContacts([], [{ name, phoneNumber }]);
+                
                 // Send failure message
-                return repondre(`❌ *Number Check Result*\n\n• Number: *${phoneNumber}*\n• Status: *Not registered on WhatsApp*`);
+                return repondre(`❌ *Number Check Result*\n\n• Number: *${phoneNumber}*\n• Status: *Not registered on WhatsApp*\n\n_This result has been saved for reference._`);
             }
         } catch (error) {
             console.error("Error checking number:", error);
@@ -138,6 +215,9 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
         }
     }
     
+    // Save contacts to storage
+    const savedStats = saveContacts(whatsappUsers, nonWhatsappUsers);
+    
     // Generate report
     let report = `📊 *WhatsApp Contact Verification Report*\n\n`;
     report += `✅ *Registered on WhatsApp (${whatsappUsers.length}):*\n`;
@@ -169,6 +249,12 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
     report += `• WhatsApp users: ${whatsappUsers.length}\n`;
     report += `• Non-WhatsApp users: ${nonWhatsappUsers.length}\n`;
     report += `• Failed checks: ${failedChecks}\n`;
+    
+    if (savedStats) {
+        report += `\n💾 *Saved Contacts Database:*\n`;
+        report += `• Total WhatsApp users saved: ${savedStats.whatsappCount}\n`;
+        report += `• Total non-WhatsApp users saved: ${savedStats.nonWhatsappCount}\n`;
+    }
 
     // Check if report is too long for WhatsApp (message limit is around 65536 characters)
     if (report.length > 65000) {
@@ -181,13 +267,80 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
             document: fs.readFileSync(reportFile),
             mimetype: 'text/plain',
             fileName: 'WhatsApp_Contact_Report.txt',
-            caption: `📊 WhatsApp Contact Verification Report\n\nTotal contacts: ${lines.length}\nWhatsApp users: ${whatsappUsers.length}\nNon-WhatsApp users: ${nonWhatsappUsers.length}`
+            caption: `📊 WhatsApp Contact Verification Report\n\nTotal contacts: ${lines.length}\nWhatsApp users: ${whatsappUsers.length}\nNon-WhatsApp users: ${nonWhatsappUsers.length}\n\n_All contacts have been saved for reference._`
         });
         
         // Clean up file
         fs.unlinkSync(reportFile);
     } else {
-        // Send report as message
-        repondre(report);
+        // Send report as message with saved notification
+        repondre(report + "\n\n_All contacts have been saved for reference._");
     }
 }
+
+// Add a command to list saved contacts
+adams({ nomCom: "walist", categorie: "General" }, async (dest, zk, commandeOptions) => {
+    const { ms, repondre, arg } = commandeOptions;
+    
+    try {
+        const savedContacts = loadSavedContacts();
+        const whatsappCount = savedContacts.whatsappUsers.length;
+        const nonWhatsappCount = savedContacts.nonWhatsappUsers.length;
+        const lastUpdated = savedContacts.lastUpdated ? new Date(savedContacts.lastUpdated).toLocaleString() : 'Never';
+        
+        let report = `📋 *Saved WhatsApp Contacts Report*\n\n`;
+        report += `Last updated: ${lastUpdated}\n\n`;
+        report += `✅ *WhatsApp Users (${whatsappCount}):*\n`;
+        
+        if (whatsappCount > 0) {
+            // Get the type of list requested
+            const listType = arg[0]?.toLowerCase();
+            if (listType === 'csv') {
+                // Generate CSV format
+                let csvData = 'Name,Phone Number\n';
+                savedContacts.whatsappUsers.forEach(user => {
+                    csvData += `"${user.name.replace(/"/g, '""')}",+${user.phoneNumber}\n`;
+                });
+                
+                // Save to file
+                const csvFile = './whatsapp_contacts.csv';
+                fs.writeFileSync(csvFile, csvData);
+                
+                // Send CSV file
+                await zk.sendMessage(dest, {
+                    document: fs.readFileSync(csvFile),
+                    mimetype: 'text/csv',
+                    fileName: 'WhatsApp_Contacts.csv',
+                    caption: `📊 Exported WhatsApp Contacts\n\nTotal WhatsApp users: ${whatsappCount}\nLast updated: ${lastUpdated}`
+                });
+                
+                // Clean up file
+                fs.unlinkSync(csvFile);
+                return;
+            } else {
+                // List format
+                savedContacts.whatsappUsers.forEach((user, index) => {
+                    if (index < 100) { // Limit to first 100 to avoid message too long
+                        report += `${index + 1}. ${user.name}: +${user.phoneNumber}\n`;
+                    }
+                });
+                
+                if (whatsappCount > 100) {
+                    report += `... and ${whatsappCount - 100} more contacts (use .walist csv for full export)\n`;
+                }
+            }
+        } else {
+            report += `No WhatsApp users saved.\n`;
+        }
+        
+        report += `\n📝 *Usage:*\n`;
+        report += `• Type *.walist* to view saved WhatsApp contacts\n`;
+        report += `• Type *.walist csv* to export as CSV file\n`;
+        
+        // Send report
+        repondre(report);
+    } catch (error) {
+        console.error('Error retrieving saved contacts:', error);
+        repondre('❌ Error retrieving saved contacts. Please try again later.');
+    }
+});
