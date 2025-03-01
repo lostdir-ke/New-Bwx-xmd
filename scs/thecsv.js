@@ -13,6 +13,47 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
     // Reply that the bot is ready to receive a CSV file
     await repondre("Please send a contacts.csv file. I will process it and extract valid contacts.");
     
+    // Check if command is a reply to a document
+    const quotedMsg = ms.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    if (quotedMsg && quotedMsg.documentMessage) {
+        const doc = quotedMsg.documentMessage;
+        if (doc.mimetype === 'text/csv' || 
+            doc.mimetype === 'application/csv' ||
+            doc.mimetype === 'text/comma-separated-values' ||
+            doc.mimetype === 'application/vnd.ms-excel' ||
+            doc.fileName?.toLowerCase().endsWith('.csv')) {
+            
+            try {
+                await repondre("📄 CSV file detected in your reply! Processing contacts...");
+                
+                // Get the message that was replied to
+                const quotedM = {
+                    message: {
+                        documentMessage: doc
+                    },
+                    key: {
+                        remoteJid: dest
+                    }
+                };
+                
+                // Download the document
+                const buffer = await zk.downloadMediaMessage(quotedM);
+                const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                fs.writeFileSync(csvPath, buffer);
+                
+                // Process the CSV file directly
+                return processCSVFile(csvPath);
+            } catch (error) {
+                console.error("Error processing CSV from reply:", error);
+                await repondre("❌ Error processing the CSV file from your reply. Please try again.");
+                return;
+            }
+        } else {
+            await repondre("⚠️ The file you replied to is not a valid CSV file.");
+            return;
+        }
+    }
+    
     // Set up a one-time message event listener for the CSV file
     const waitForCSV = async () => {
         return new Promise((resolve, reject) => {
@@ -72,14 +113,13 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
         });
     };
     
-    try {
-        // Wait for the CSV file
-        await repondre("⏱️ Waiting for your CSV file... Please send it within 5 minutes.");
-        const csvPath = await waitForCSV();
-        
+    // Function to process CSV file
+    const processCSVFile = async (csvPath) => {
         // Process the contacts
         const validContacts = [];
         const corruptedContacts = [];
+        
+        try {
         
         // Read and parse CSV manually
         const fileContent = fs.readFileSync(csvPath, 'utf8');
@@ -225,34 +265,47 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
         fs.writeFileSync(corruptedContactsPath, JSON.stringify(corruptedContacts, null, 2));
         
         // Clean up the temporary CSV file
-        fs.unlinkSync(csvPath);
-        
-        // Send the results
-        await repondre(`📊 *CSV Processing Complete*\n\n` +
-            `✅ Valid WhatsApp Contacts: *${validContacts.length}*\n` +
-            `❌ Invalid/Non-WhatsApp Contacts: *${corruptedContacts.length}*\n\n` +
-            `The contacts have been processed and saved. Valid contacts are stored in valid_contacts.json and corrupted ones in corrupted_contacts.json.`);
+            fs.unlinkSync(csvPath);
             
-        // Send the valid contacts file if there are any
-        if (validContacts.length > 0) {
-            await zk.sendMessage(dest, {
-                document: fs.readFileSync(validContactsPath),
-                mimetype: 'application/json',
-                fileName: 'valid_contacts.json',
-                caption: `✅ ${validContacts.length} valid WhatsApp contacts`
-            });
+            // Send the results
+            await repondre(`📊 *CSV Processing Complete*\n\n` +
+                `✅ Valid WhatsApp Contacts: *${validContacts.length}*\n` +
+                `❌ Invalid/Non-WhatsApp Contacts: *${corruptedContacts.length}*\n\n` +
+                `The contacts have been processed and saved. Valid contacts are stored in valid_contacts.json and corrupted ones in corrupted_contacts.json.`);
+                
+            // Send the valid contacts file if there are any
+            if (validContacts.length > 0) {
+                await zk.sendMessage(dest, {
+                    document: fs.readFileSync(validContactsPath),
+                    mimetype: 'application/json',
+                    fileName: 'valid_contacts.json',
+                    caption: `✅ ${validContacts.length} valid WhatsApp contacts`
+                });
+            }
+            
+            // Send the corrupted contacts file if there are any
+            if (corruptedContacts.length > 0) {
+                await zk.sendMessage(dest, {
+                    document: fs.readFileSync(corruptedContactsPath),
+                    mimetype: 'application/json',
+                    fileName: 'corrupted_contacts.json',
+                    caption: `❌ ${corruptedContacts.length} invalid or non-WhatsApp contacts`
+                });
+            }
+            
+        } catch (error) {
+            console.error("Error processing CSV:", error);
+            await repondre("❌ An error occurred while processing the CSV file. Please try again.");
         }
-        
-        // Send the corrupted contacts file if there are any
-        if (corruptedContacts.length > 0) {
-            await zk.sendMessage(dest, {
-                document: fs.readFileSync(corruptedContactsPath),
-                mimetype: 'application/json',
-                fileName: 'corrupted_contacts.json',
-                caption: `❌ ${corruptedContacts.length} invalid or non-WhatsApp contacts`
-            });
+    };
+    
+    try {
+        // If we didn't already process a reply to a file, wait for the CSV file
+        if (!(quotedMsg && quotedMsg.documentMessage)) {
+            await repondre("⏱️ Waiting for your CSV file... Please send it within 5 minutes.");
+            const csvPath = await waitForCSV();
+            await processCSVFile(csvPath);
         }
-        
     } catch (error) {
         console.error("Error in CSV command:", error);
         await repondre("❌ An error occurred while waiting for or processing the CSV file. Please try again.");
