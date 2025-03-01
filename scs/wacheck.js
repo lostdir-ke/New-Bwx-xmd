@@ -451,8 +451,11 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
                     await zk.sendMessage(dest, { text: `📤 Progress update: Sent messages to ${sentCount} contacts so far.` });
                 }
                 
-                // Random delay between 1-2 minutes
-                const delaySeconds = Math.floor(Math.random() * 60) + 60; // 60-120 seconds
+                // Random delay between 1-2 minutes with better randomization
+                const minDelaySeconds = 60; // 1 minute minimum
+                const maxDelaySeconds = 120; // 2 minutes maximum
+                const delaySeconds = Math.floor(Math.random() * (maxDelaySeconds - minDelaySeconds + 1)) + minDelaySeconds;
+                console.log(`Waiting ${delaySeconds} seconds before sending next message...`);
                 await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
             } catch (error) {
                 console.error(`Error sending message to ${phoneNumber}:`, error);
