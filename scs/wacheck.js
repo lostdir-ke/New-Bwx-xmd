@@ -549,3 +549,38 @@ adams({ nomCom: "wastop", categorie: "General" }, async (dest, zk, commandeOptio
     
     repondre("🛑 *Broadcast Stopped*\n\nThe message broadcast has been stopped. Any messages currently being sent will complete, but no new messages will be sent.\n\nUse *.wabroadcast* to start a new broadcast.");
 });
+
+// Command to check WhatsApp contacts from a URL containing a text file
+adams({ nomCom: "wacheckurl", categorie: "General" }, async (dest, zk, commandeOptions) => {
+    const { ms, repondre, arg } = commandeOptions;
+    
+    if (!arg || arg.length === 0) {
+        return repondre("Please provide a URL to a text file containing contacts.\n\nExample: *.wacheckurl https://example.com/contacts.txt*\n\nThe file should contain contacts in the format:\nName,Phone Number\nName2,Phone Number2\n...");
+    }
+    
+    const url = arg[0];
+    
+    // Send processing notification
+    repondre(`🔍 Attempting to download contacts from URL:\n${url}\n\nPlease wait...`);
+    
+    try {
+        // Download the file content
+        const response = await axios.get(url, {
+            timeout: 15000,
+            responseType: 'text'
+        });
+        
+        if (!response.data || response.data.trim() === '') {
+            return repondre("❌ The downloaded file is empty or invalid. Please check the URL and try again.");
+        }
+        
+        // Process the downloaded content
+        repondre(`✅ File downloaded successfully! Processing contacts...`);
+        
+        // Process the content the same way as .wacheck bulk check
+        await handleBulkCheck(response.data, zk, dest, repondre);
+    } catch (error) {
+        console.error("Error downloading or processing file:", error);
+        return repondre(`❌ Failed to download or process the file. Error: ${error.message || "Unknown error"}\n\nPlease verify the URL is correct and accessible.`);
+    }
+});
