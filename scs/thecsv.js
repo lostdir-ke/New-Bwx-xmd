@@ -10,8 +10,7 @@ const { createReadStream, createWriteStream } = require('fs');
 adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptions) => {
     const { ms, repondre, auteurMessage } = commandeOptions;
     
-    // Reply that the bot is ready to receive a CSV file
-    await repondre("Please send a contacts.csv file. I will process it and extract valid contacts.");
+    // Initial message removed as requested
     
     // Check if command is a reply to a document
     const quotedMsg = ms.message?.extendedTextMessage?.contextInfo?.quotedMessage;
