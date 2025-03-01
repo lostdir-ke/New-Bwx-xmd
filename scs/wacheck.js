@@ -491,28 +491,68 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
         }
         
         // Start broadcasting
-        repondre(`🔄 Starting to send messages to ${whatsappUsers.length} WhatsApp contacts...\nUse *.wastop* to stop the broadcast at any time.`);
+        repondre(`🔄 Starting to send messages to ${whatsappUsers.length} WhatsApp contacts...\nUse *.wastop* to stop the broadcast at any time.\nIf process is interrupted, use *.wabroadcastresume* to continue.`);
         
         // Set the broadcast flag to true
         isBroadcastRunning = true;
         
-        let sentCount = 0;
-        let skippedCount = 0;
-        let failedCount = 0;
-        let stoppedEarly = false;
-        
         // Custom message to send
         const baseMessage = "I'm NICHOLAS, another status viewer. Can we be friends? Please save my number. Your contact is already saved in my phone.";
         
+        // Save broadcast progress data for potential resume
+        broadcastProgressData = {
+            isActive: true,
+            contacts: whatsappUsers,
+            currentIndex: 0,
+            totalContacts: whatsappUsers.length,
+            message: baseMessage,
+            lastActive: new Date().toISOString()
+        };
+        saveBroadcastProgress();
+        
+        // Start the broadcast with the resume function, starting from index 0
+        await processBroadcast(zk, dest, repondre, 0);
+    } catch (error) {
+        // Reset the broadcast flag in case of error
+        isBroadcastRunning = false;
+        
+        console.error('Error broadcasting messages:', error);
+        repondre('❌ Error broadcasting messages. Please try again later.');
+    }
+});
+
+// Function to process broadcast messages with resume capability
+async function processBroadcast(zk, dest, repondre, startIndex = 0) {
+    let sentCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    let stoppedEarly = false;
+    
+    try {
+        // Get contacts from saved progress
+        const contacts = broadcastProgressData.contacts;
+        const baseMessage = broadcastProgressData.message;
+        
         // Process contacts one by one with random delay
-        for (let i = 0; i < whatsappUsers.length; i++) {
+        for (let i = startIndex; i < contacts.length; i++) {
+            // Update progress in case of interruption
+            broadcastProgressData.currentIndex = i;
+            broadcastProgressData.lastActive = new Date().toISOString();
+            
+            // Save progress periodically
+            if (i % 5 === 0) {
+                saveBroadcastProgress();
+            }
+            
             // Check if the broadcast should be stopped
             if (!isBroadcastRunning) {
                 stoppedEarly = true;
+                broadcastProgressData.isActive = false;
+                saveBroadcastProgress();
                 break;
             }
             
-            const user = whatsappUsers[i];
+            const user = contacts[i];
             const phoneNumber = user.phoneNumber;
             const name = user.name || "Friend";
             
@@ -535,7 +575,7 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
                 
                 // Send progress update every 10 messages
                 if (sentCount % 10 === 0 && isBroadcastRunning) {
-                    await zk.sendMessage(dest, { text: `📤 Progress update: Sent messages to ${sentCount} contacts so far.` });
+                    await zk.sendMessage(dest, { text: `📤 Progress update: Sent messages to ${sentCount} contacts so far (${i+1}/${contacts.length} processed).` });
                 }
                 
                 // Random delay between 1-2 minutes with better randomization
@@ -550,6 +590,12 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
             }
         }
         
+        // Mark broadcast as complete if not stopped early
+        if (!stoppedEarly) {
+            broadcastProgressData.isActive = false;
+            saveBroadcastProgress();
+        }
+        
         // Reset the broadcast flag
         isBroadcastRunning = false;
         
@@ -558,7 +604,7 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
                      `✅ Successfully sent: ${sentCount}\n` +
                      `⏭️ Skipped (already sent): ${skippedCount}\n` +
                      `❌ Failed to send: ${failedCount}\n\n` +
-                     `Total WhatsApp contacts: ${whatsappUsers.length}`;
+                     `Total WhatsApp contacts processed: ${contacts.length - startIndex}`;
         
         if (stoppedEarly) {
             report += `\n\n⚠️ The broadcast was stopped manually.`;
@@ -569,13 +615,50 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
         // Reset the broadcast flag in case of error
         isBroadcastRunning = false;
         
-        console.error('Error broadcasting messages:', error);
-        repondre('❌ Error broadcasting messages. Please try again later.');
+        console.error('Error in processBroadcast:', error);
+        repondre(`❌ Error during broadcast: ${error.message}\n\nYou can resume using *.wabroadcastresume*.`);
     }
-});
+}
 
-// Global variable to track if broadcast is running and should continue
+// Global variables for broadcast tracking
 let isBroadcastRunning = false;
+let broadcastProgressData = {
+    isActive: false,
+    contacts: [],
+    currentIndex: 0,
+    totalContacts: 0,
+    message: "",
+    lastActive: null
+};
+
+// Function to save broadcast progress to file
+function saveBroadcastProgress() {
+    try {
+        const progressFilePath = path.join(__dirname, '../xmd/broadcast_progress.json');
+        fs.writeFileSync(progressFilePath, JSON.stringify(broadcastProgressData, null, 2));
+        console.log(`Broadcast progress saved. Current index: ${broadcastProgressData.currentIndex}/${broadcastProgressData.totalContacts}`);
+        return true;
+    } catch (error) {
+        console.error('Error saving broadcast progress:', error);
+        return false;
+    }
+}
+
+// Function to load broadcast progress from file
+function loadBroadcastProgress() {
+    try {
+        const progressFilePath = path.join(__dirname, '../xmd/broadcast_progress.json');
+        if (fs.existsSync(progressFilePath)) {
+            const data = JSON.parse(fs.readFileSync(progressFilePath, 'utf8'));
+            broadcastProgressData = data;
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('Error loading broadcast progress:', error);
+        return false;
+    }
+}
 
 // Function to estimate broadcast time
 adams({ nomCom: "wabroadcastinfo", categorie: "General" }, async (dest, zk, commandeOptions) => {
@@ -916,3 +999,57 @@ adams({ nomCom: "wacheckurl", categorie: "General" }, async (dest, zk, commandeO
         return repondre(errorMessage + "\n\nPlease verify the URL is correct and accessible.");
     }
 });
+
+
+// Command to resume broadcast after shutdown or interruption
+adams({ nomCom: "wabroadcastresume", categorie: "General" }, async (dest, zk, commandeOptions) => {
+    const { repondre, superUser } = commandeOptions;
+    
+    // Only allow the bot owner to use this command
+    if (!superUser) {
+        return repondre("❌ Only the bot owner can use this command.");
+    }
+    
+    // Check if a broadcast is already running
+    if (isBroadcastRunning) {
+        return repondre("⚠️ A broadcast is already in progress. No need to resume.");
+    }
+    
+    // Check if there's a saved broadcast progress
+    if (!loadBroadcastProgress()) {
+        return repondre("❌ No saved broadcast progress found. Please use *.wabroadcast* to start a new broadcast.");
+    }
+    
+    // Check if the saved broadcast progress is valid and active
+    if (!broadcastProgressData.isActive || broadcastProgressData.contacts.length === 0) {
+        return repondre("❌ No active broadcast found to resume. Please use *.wabroadcast* to start a new broadcast.");
+    }
+    
+    // Calculate how much time has passed since last activity
+    const lastActive = new Date(broadcastProgressData.lastActive);
+    const now = new Date();
+    const hoursPassed = (now - lastActive) / (1000 * 60 * 60);
+    
+    // Get the resume details
+    const currentIndex = broadcastProgressData.currentIndex;
+    const totalContacts = broadcastProgressData.totalContacts;
+    const remainingContacts = totalContacts - currentIndex;
+    
+    // Calculate estimated time to complete (90 seconds per message on average)
+    const estimatedMinutes = Math.ceil((remainingContacts * 90) / 60);
+    
+    // Display resume information
+    repondre(`📋 *Found Saved Broadcast Progress*\n\n` +
+             `• Last active: *${lastActive.toLocaleString()}* (${hoursPassed.toFixed(1)} hours ago)\n` +
+             `• Progress: *${currentIndex}/${totalContacts}* contacts processed\n` +
+             `• Remaining: *${remainingContacts}* contacts\n` +
+             `• Estimated time: ~${estimatedMinutes} minutes\n\n` +
+             `Resuming broadcast from where it was interrupted...`);
+    
+    // Set the broadcast flag to true
+    isBroadcastRunning = true;
+    
+    // Resume the broadcast from the saved index
+    await processBroadcast(zk, dest, repondre, currentIndex);
+});
+
