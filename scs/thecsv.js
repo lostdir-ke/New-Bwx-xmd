@@ -21,7 +21,11 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
                     // Check if a document was sent and it's a CSV file
                     if (m.message && m.message.documentMessage) {
                         const doc = m.message.documentMessage;
-                        if (doc.mimetype === 'text/csv' || doc.fileName?.endsWith('.csv')) {
+                        if (doc.mimetype === 'text/csv' || 
+                            doc.mimetype === 'application/csv' ||
+                            doc.mimetype === 'text/comma-separated-values' ||
+                            doc.mimetype === 'application/vnd.ms-excel' ||
+                            doc.fileName?.toLowerCase().endsWith('.csv')) {
                             // Remove the listener since we got what we wanted
                             zk.ev.off('messages.upsert', listener);
                             
@@ -52,7 +56,12 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
             const timeout = setTimeout(() => {
                 zk.ev.off('messages.upsert', listener);
                 reject(new Error("Timeout waiting for CSV file"));
-            }, 60000); // 1 minute timeout
+            }, 300000); // 5 minutes timeout
+            
+            // Notify user about timeout
+            setTimeout(() => {
+                repondre("⏳ Still waiting for CSV file... You have 4 minutes remaining.");
+            }, 60000); // After 1 minute remind user
             
             // Register the listener
             zk.ev.on('messages.upsert', async ({ messages }) => {
@@ -65,6 +74,7 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
     
     try {
         // Wait for the CSV file
+        await repondre("⏱️ Waiting for your CSV file... Please send it within 5 minutes.");
         const csvPath = await waitForCSV();
         
         // Process the contacts
