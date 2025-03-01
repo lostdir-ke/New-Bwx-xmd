@@ -104,7 +104,7 @@ adams({ nomCom: "wacheck", categorie: "General" }, async (dest, zk, commandeOpti
 
     // If no argument is provided, ask for the phone number
     if (!arg || arg.length === 0) {
-        return repondre("Please enter a phone number to check if it's registered on WhatsApp.\n\nExample: *.wacheck 712345678*\n\nFor bulk checking, send a list in format:\nName,Phone Number\nName2,Phone Number2\n...");
+        return repondre("Please enter a phone number to check if it's registered on WhatsApp.\n\nExample: *.wacheck 712345678*\n\nFor bulk checking, send a list in format:\nName,Phone Number\nName2,Phone Number2\n...\n\nIf the process is interrupted, use *.waresume* to continue.");
     }
 
     // Join all arguments to handle multiline input
@@ -114,8 +114,8 @@ adams({ nomCom: "wacheck", categorie: "General" }, async (dest, zk, commandeOpti
     const isBulkCheck = inputText.includes('\n') || (inputText.split(',').length > 1 && !inputText.startsWith('+') && !/^\d/.test(inputText));
     
     if (isBulkCheck) {
-        // Process bulk check
-        await handleBulkCheck(inputText, zk, dest, repondre);
+        // Process bulk check with resume support
+        await handleBulkCheck(inputText, zk, dest, repondre, "wacheck");
     } else {
         // Process single number check
         let phoneNumber = inputText.replace(/\s+/g, '');
@@ -166,8 +166,8 @@ adams({ nomCom: "wacheck", categorie: "General" }, async (dest, zk, commandeOpti
     }
 });
 
-// Function to handle bulk checking of contacts with improved speed
-async function handleBulkCheck(inputText, zk, dest, repondre) {
+// Function to handle bulk checking of contacts with improved speed and resume support
+async function handleBulkCheck(inputText, zk, dest, repondre, command = "wacheck", url = "") {
     // Parse the input text to extract contacts
     const lines = inputText.split('\n').filter(line => line.trim() !== '');
     
@@ -176,7 +176,7 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
     }
     
     // Initial notification
-    repondre(`🔍 Processing *${lines.length}* contacts for WhatsApp verification...\nOptimized for faster processing.`);
+    repondre(`🔍 Processing *${lines.length}* contacts for WhatsApp verification...\nOptimized for faster processing.\nUse *.waresume* if the process is interrupted.`);
     
     // Send a typing indicator
     await zk.sendPresenceUpdate('composing', dest);
@@ -190,7 +190,9 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
     const BATCH_SIZE = 20; // Process more numbers before sending a progress update
     const RATE_LIMIT_DELAY = 500; // Smaller delay (in ms) to avoid rate limiting
     
-    // Process contacts one by one
+    // Prepare contacts for processing and potential resume
+    const processedContacts = [];
+    
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         
@@ -220,11 +222,42 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
             }
         }
         
+        // Add to processed contacts
+        processedContacts.push({ name, phoneNumber });
+    }
+    
+    // Setup and save progress data for potential resume
+    checkProgressData = {
+        isActive: true,
+        contactsToCheck: processedContacts,
+        currentIndex: 0,
+        totalContacts: processedContacts.length,
+        command: command,
+        url: url,
+        lastActive: new Date().toISOString()
+    };
+    saveCheckProgress();
+    
+    // Process contacts one by one
+    for (let i = 0; i < processedContacts.length; i++) {
+        // Update progress in case of interruption
+        checkProgressData.currentIndex = i;
+        checkProgressData.lastActive = new Date().toISOString();
+        
+        // Save progress periodically
+        if (i % 10 === 0) {
+            saveCheckProgress();
+        }
+        
+        const contact = processedContacts[i];
+        const name = contact.name;
+        const phoneNumber = contact.phoneNumber;
+        
         try {
             // Send progress updates at optimized intervals
             if (i > 0 && i % BATCH_SIZE === 0) {
-                const progressPercentage = Math.floor((i / lines.length) * 100);
-                repondre(`⏳ Progress: ${progressPercentage}% (Checked ${i}/${lines.length} contacts)`);
+                const progressPercentage = Math.floor((i / processedContacts.length) * 100);
+                repondre(`⏳ Progress: ${progressPercentage}% (Checked ${i}/${processedContacts.length} contacts)`);
                 
                 // Small delay every batch to avoid rate limiting, but much shorter
                 await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
@@ -248,6 +281,10 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
             // Continue to the next number without much delay
         }
     }
+    
+    // Mark check as completed
+    checkProgressData.isActive = false;
+    saveCheckProgress();
     
     // Save contacts to storage
     const savedStats = saveContacts(whatsappUsers, nonWhatsappUsers);
@@ -600,6 +637,225 @@ adams({ nomCom: "wastop", categorie: "General" }, async (dest, zk, commandeOptio
     repondre("🛑 *Broadcast Stopped*\n\nThe message broadcast has been stopped. Any messages currently being sent will complete, but no new messages will be sent.\n\nUse *.wabroadcast* to start a new broadcast.");
 });
 
+// Store check progress for resume functionality
+let checkProgressData = {
+    isActive: false,
+    contactsToCheck: [],
+    currentIndex: 0,
+    totalContacts: 0,
+    command: "", // "wacheck" or "wacheckurl"
+    url: "", // Only used for wacheckurl
+    lastActive: null
+};
+
+// Function to save check progress to file
+function saveCheckProgress() {
+    try {
+        const progressFilePath = path.join(__dirname, '../xmd/check_progress.json');
+        fs.writeFileSync(progressFilePath, JSON.stringify(checkProgressData, null, 2));
+        console.log(`Check progress saved. Current index: ${checkProgressData.currentIndex}/${checkProgressData.totalContacts}`);
+        return true;
+    } catch (error) {
+        console.error('Error saving check progress:', error);
+        return false;
+    }
+}
+
+// Function to load check progress from file
+function loadCheckProgress() {
+    try {
+        const progressFilePath = path.join(__dirname, '../xmd/check_progress.json');
+        if (fs.existsSync(progressFilePath)) {
+            const data = JSON.parse(fs.readFileSync(progressFilePath, 'utf8'));
+            checkProgressData = data;
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('Error loading check progress:', error);
+        return false;
+    }
+}
+
+// Resume command to continue checks after shutdown
+adams({ nomCom: "waresume", categorie: "General" }, async (dest, zk, commandeOptions) => {
+    const { repondre, superUser } = commandeOptions;
+    
+    // Check if there's a saved progress
+    if (!loadCheckProgress()) {
+        return repondre("❌ No saved check progress found. Please use *.wacheck* or *.wacheckurl* to start a new check.");
+    }
+    
+    // Check if the saved progress is valid
+    if (!checkProgressData.isActive || checkProgressData.contactsToCheck.length === 0) {
+        return repondre("❌ No valid check progress found to resume. Please use *.wacheck* or *.wacheckurl* to start a new check.");
+    }
+    
+    // Calculate how much time has passed since last activity
+    const lastActive = new Date(checkProgressData.lastActive);
+    const now = new Date();
+    const hoursPassed = (now - lastActive) / (1000 * 60 * 60);
+    
+    // Display resume information
+    const remainingContacts = checkProgressData.totalContacts - checkProgressData.currentIndex;
+    
+    repondre(`📋 *Found Saved Progress*\n\n` +
+             `• Command: *${checkProgressData.command}*\n` +
+             `• Last active: *${lastActive.toLocaleString()}* (${hoursPassed.toFixed(1)} hours ago)\n` +
+             `• Progress: *${checkProgressData.currentIndex}/${checkProgressData.totalContacts}* contacts checked\n` +
+             `• Remaining: *${remainingContacts}* contacts\n\n` +
+             `Resuming check from where it was interrupted...`);
+    
+    // Resume the check based on command type
+    if (checkProgressData.command === "wacheckurl") {
+        // For URL checks, continue with the contacts already downloaded
+        await resumeBulkCheck(zk, dest, repondre);
+    } else {
+        // For direct checks, continue with the contacts already processed
+        await resumeBulkCheck(zk, dest, repondre);
+    }
+});
+
+// Function to resume bulk check from where it left off
+async function resumeBulkCheck(zk, dest, repondre) {
+    if (!checkProgressData.isActive) {
+        return repondre("❌ No active check to resume.");
+    }
+    
+    // Arrays to store results
+    const whatsappUsers = [];
+    const nonWhatsappUsers = [];
+    let failedChecks = 0;
+    
+    // Set parameters for processing
+    const BATCH_SIZE = 20;
+    const RATE_LIMIT_DELAY = 500;
+    
+    // Resume from the current index
+    const startIndex = checkProgressData.currentIndex;
+    const contacts = checkProgressData.contactsToCheck;
+    
+    repondre(`🔄 Resuming check from contact #${startIndex+1}/${contacts.length}...`);
+    
+    for (let i = startIndex; i < contacts.length; i++) {
+        // Update current index in progress data
+        checkProgressData.currentIndex = i;
+        checkProgressData.lastActive = new Date().toISOString();
+        
+        // Save progress every 10 contacts
+        if (i % 10 === 0) {
+            saveCheckProgress();
+        }
+        
+        const contact = contacts[i];
+        const name = contact.name;
+        const phoneNumber = contact.phoneNumber;
+        
+        try {
+            // Send progress updates at intervals
+            if ((i - startIndex) > 0 && (i - startIndex) % BATCH_SIZE === 0) {
+                const progressPercentage = Math.floor(((i + 1) / contacts.length) * 100);
+                repondre(`⏳ Resume Progress: ${progressPercentage}% (Checked ${i+1}/${contacts.length} contacts)`);
+                await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
+            }
+            
+            const [result] = await zk.onWhatsApp(phoneNumber + '@s.whatsapp.net');
+            
+            if (result && result.exists) {
+                whatsappUsers.push({ name, phoneNumber });
+            } else {
+                nonWhatsappUsers.push({ name, phoneNumber });
+            }
+            
+            // Add minimal delay between each check
+            if (i % 5 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        } catch (error) {
+            console.error(`Error checking number ${phoneNumber}:`, error);
+            failedChecks++;
+        }
+    }
+    
+    // Mark check as complete
+    checkProgressData.isActive = false;
+    saveCheckProgress();
+    
+    // Save contacts to storage
+    const savedStats = saveContacts(whatsappUsers, nonWhatsappUsers);
+    
+    // Generate report
+    let report = [`📊 *Resume Check Report*\n\n`];
+    report.push(`✅ *Registered on WhatsApp (${whatsappUsers.length}):*\n`);
+    
+    if (whatsappUsers.length > 0) {
+        const chunks = [];
+        for (let i = 0; i < whatsappUsers.length; i++) {
+            if (i < 100) {
+                chunks.push(`${i + 1}. ${whatsappUsers[i].name}: +${whatsappUsers[i].phoneNumber}`);
+            } else {
+                chunks.push(`... and ${whatsappUsers.length - 100} more contacts`);
+                break;
+            }
+        }
+        report.push(chunks.join('\n'));
+    } else {
+        report.push(`None of the contacts are registered on WhatsApp.`);
+    }
+    
+    report.push(`\n❌ *Not Registered on WhatsApp (${nonWhatsappUsers.length}):*\n`);
+    
+    if (nonWhatsappUsers.length > 0) {
+        const chunks = [];
+        for (let i = 0; i < nonWhatsappUsers.length; i++) {
+            if (i < 100) {
+                chunks.push(`${i + 1}. ${nonWhatsappUsers[i].name}: +${nonWhatsappUsers[i].phoneNumber}`);
+            } else {
+                chunks.push(`... and ${nonWhatsappUsers.length - 100} more contacts`);
+                break;
+            }
+        }
+        report.push(chunks.join('\n'));
+    } else {
+        report.push(`All contacts are registered on WhatsApp.`);
+    }
+    
+    if (failedChecks > 0) {
+        report.push(`\n⚠️ Failed to check ${failedChecks} contacts due to errors.`);
+    }
+    
+    report.push(`\n📝 *Summary:*`);
+    report.push(`• Total contacts processed: ${contacts.length - startIndex}`);
+    report.push(`• WhatsApp users: ${whatsappUsers.length}`);
+    report.push(`• Non-WhatsApp users: ${nonWhatsappUsers.length}`);
+    report.push(`• Failed checks: ${failedChecks}`);
+    
+    if (savedStats) {
+        report.push(`\n💾 *Saved Contacts Database:*`);
+        report.push(`• Total WhatsApp users saved: ${savedStats.whatsappCount}`);
+        report.push(`• Total non-WhatsApp users saved: ${savedStats.nonWhatsappCount}`);
+    }
+    
+    // Send final report
+    const finalReport = report.join('\n');
+    
+    if (finalReport.length > 65000) {
+        const reportFile = './wa_check_report.txt';
+        fs.writeFileSync(reportFile, finalReport);
+        
+        await zk.sendMessage(dest, {
+            document: fs.readFileSync(reportFile),
+            mimetype: 'text/plain',
+            fileName: 'WhatsApp_Resume_Report.txt',
+            caption: `📊 WhatsApp Check Resume Report\n\nTotal contacts: ${contacts.length - startIndex}\nWhatsApp users: ${whatsappUsers.length}\nNon-WhatsApp users: ${nonWhatsappUsers.length}\n\n_All contacts have been saved for reference._`
+        });
+        
+        fs.unlinkSync(reportFile);
+    } else {
+        repondre(finalReport + "\n\n_All contacts have been saved for reference._");
+    }
+}
+
 // Command to check WhatsApp contacts from a URL containing a text file (optimized)
 adams({ nomCom: "wacheckurl", categorie: "General" }, async (dest, zk, commandeOptions) => {
     const { ms, repondre, arg } = commandeOptions;
@@ -634,10 +890,10 @@ adams({ nomCom: "wacheckurl", categorie: "General" }, async (dest, zk, commandeO
         const sizeInKB = contentLength ? Math.round(parseInt(contentLength) / 1024) : 'unknown';
         
         // Process the downloaded content with size info
-        repondre(`✅ File downloaded successfully! (${sizeInKB}KB)\nProcessing contacts with optimized speed...`);
+        repondre(`✅ File downloaded successfully! (${sizeInKB}KB)\nProcessing contacts with optimized speed...\nIf interrupted, use *.waresume* to continue.`);
         
-        // Process the content with our optimized bulk check function
-        await handleBulkCheck(response.data, zk, dest, repondre);
+        // Process the content with our optimized bulk check function (with resume support)
+        await handleBulkCheck(response.data, zk, dest, repondre, "wacheckurl", url);
     } catch (error) {
         console.error("Error downloading or processing file:", error);
         
