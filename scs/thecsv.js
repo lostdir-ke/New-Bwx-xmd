@@ -1,511 +1,254 @@
-
 'use strict';
 
 const { adams } = require(__dirname + "/../Ibrahim/adams");
 const fs = require('fs');
 const path = require('path');
-const { pipeline } = require('stream/promises');
-const { createReadStream, createWriteStream } = require('fs');
+const { createReadStream } = require('fs');
 
 adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptions) => {
     const { ms, repondre, auteurMessage } = commandeOptions;
-    
-    // Initial message removed as requested
-    
-    // Check if command is a reply to a document
-    const quotedMsg = ms.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-    
-    // Check if there's a quoted message and if it contains a document
-    if (quotedMsg) {
-        // First check if there's an actual document in the quoted message
-        if (quotedMsg.documentMessage) {
-            const doc = quotedMsg.documentMessage;
-            // Check if it's a CSV file
-            if (doc.mimetype === 'text/csv' || 
-                doc.mimetype === 'application/csv' ||
-                doc.mimetype === 'text/comma-separated-values' ||
-                doc.mimetype === 'application/vnd.ms-excel' ||
-                (doc.fileName && doc.fileName.toLowerCase().endsWith('.csv'))) {
-            
+
+    try {
+        // Check if we're replying to a message
+        if (ms.quoted || ms.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+            await repondre("📄 CSV file detected in your reply! Processing contacts...");
+
+            // Get the quoted message object
+            let quotedMsg;
             try {
-                await repondre("📄 CSV file detected in your reply! Processing contacts...");
-                
-                // Log debugging information
-                console.log("Message type:", ms.message ? Object.keys(ms.message) : "No message");
-                if (ms.message?.extendedTextMessage?.contextInfo) {
-                    console.log("Context info available:", Object.keys(ms.message.extendedTextMessage.contextInfo));
-                    if (ms.message.extendedTextMessage.contextInfo.quotedMessage) {
-                        console.log("Quoted message type:", Object.keys(ms.message.extendedTextMessage.contextInfo.quotedMessage));
-                    }
-                }
-                
-                let buffer = null;
-                let csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
-                
-                // Try multiple methods to download the CSV file
-                // Method 1: Using quotedMessage directly
-                try {
-                    const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
-                    if (contextInfo && contextInfo.quotedMessage && contextInfo.quotedMessage.documentMessage) {
-                        const targetMsg = {
-                            key: {
-                                remoteJid: dest,
-                                fromMe: false,
-                                id: contextInfo.stanzaId,
-                                participant: contextInfo.participant || dest
-                            },
-                            message: contextInfo.quotedMessage
-                        };
-                        
-                        console.log("Method 1: Attempting to download with constructed message");
-                        buffer = await zk.downloadMediaMessage(targetMsg);
-                    }
-                } catch (err1) {
-                    console.log("Method 1 failed:", err1.message);
-                }
-                
-                // Method 2: Using messageID 
-                if (!buffer) {
-                    try {
-                        console.log("Method 2: Trying to load with message ID");
-                        const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
-                        if (contextInfo && contextInfo.stanzaId) {
-                            // Try to load the message by ID
-                            const msg = await zk.loadMessage(dest, contextInfo.stanzaId);
-                            if (msg) {
-                                buffer = await zk.downloadMediaMessage(msg);
-                            }
-                        }
-                    } catch (err2) {
-                        console.log("Method 2 failed:", err2.message);
-                    }
-                }
-                
-                // Method 3: Using quoted property
-                if (!buffer) {
-                    try {
-                        console.log("Method 3: Trying with quoted property");
-                        if (ms.quoted) {
-                            buffer = await zk.downloadMediaMessage(ms.quoted);
-                        }
-                    } catch (err3) {
-                        console.log("Method 3 failed:", err3.message);
-                    }
-                }
-                
-                // Method 4: Manual extraction from quoted message mime type
-                if (!buffer) {
-                    try {
-                        console.log("Method 4: Manual extraction from quoted message");
-                        const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
-                        if (contextInfo && contextInfo.quotedMessage) {
-                            const quotedMsg = contextInfo.quotedMessage;
-                            
-                            if (quotedMsg.documentMessage) {
-                                const fileData = quotedMsg.documentMessage;
-                                const url = fileData.url;
-                                
-                                if (url) {
-                                    // Try to fetch from URL if available
-                                    const fetchResponse = await fetch(url);
-                                    buffer = await fetchResponse.buffer();
-                                } else if (fileData.mediaKey) {
-                                    // If mediaKey is available, try to download with custom params
-                                    const customMsg = {
-                                        key: {
-                                            remoteJid: dest,
-                                            id: contextInfo.stanzaId
-                                        },
-                                        message: {
-                                            documentMessage: fileData
-                                        }
-                                    };
-                                    buffer = await zk.downloadMediaMessage(customMsg);
-                                }
-                            }
-                        }
-                    } catch (err4) {
-                        console.log("Method 4 failed:", err4.message);
-                    }
-                }
-                
-                // If we got a buffer, save and process it
-                if (buffer && buffer.length > 0) {
-                    fs.writeFileSync(csvPath, buffer);
-                    console.log("Successfully downloaded and saved CSV to:", csvPath);
-                    return await processCSVFile(csvPath);
+                if (ms.quoted) {
+                    quotedMsg = ms.quoted;
                 } else {
-                    console.error("All download methods failed");
-                    
-                    // Inform the user and ask for direct upload instead
-                    await repondre("❌ Couldn't download the CSV file from your reply. Please forward the CSV file and try again, or send the CSV file directly.");
-                    
-                    // Wait for direct upload
-                    await repondre("📋 *CSV Contact Processor*\n\n📤 Please upload your contacts.csv file now, or forward it from another chat.\n\n⏱️ Waiting for your file... (5 minutes timeout)");
-                    
-                    try {
-                        const csvPath = await waitForCSV();
-                        return await processCSVFile(csvPath);
-                    } catch (waitError) {
-                        console.error("Error while waiting for CSV:", waitError);
-                        await repondre("⏱️ Time expired or error occurred. Please try again with the `.thecsv` command.");
-                        return;
-                    }
+                    const context = ms.message.extendedTextMessage.contextInfo;
+                    quotedMsg = await zk.loadMessage(dest, context.stanzaId);
                 }
+
+                // Download the media
+                const buffer = await zk.downloadMediaMessage(quotedMsg);
+                const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                fs.writeFileSync(csvPath, buffer);
+
+                // Process the CSV
+                await processCSV(csvPath);
             } catch (error) {
-                console.error("Error processing CSV from reply:", error);
-                await repondre("❌ Error processing the CSV file. Please try one of these methods:\n\n1. Forward the CSV file then reply to it with `.thecsv`\n2. Send `.thecsv` command and then upload your CSV file directly");
-                return;
+                console.error("Failed to download quoted file:", error);
+                await repondre("❌ Unable to download file from your reply. Please send the CSV file directly after using the command.");
             }
         } else {
-            await repondre("⚠️ The file you replied to is not a valid CSV file.");
-            return;
-        }
-    } else {
-        await repondre("⚠️ You replied to a message that doesn't contain a CSV file. Please reply to a message with a CSV file attachment.");
-        return;
-    }
-}
-    
-    // Set up a one-time message event listener for the CSV file
-    const waitForCSV = async () => {
-        return new Promise((resolve, reject) => {
-            const listener = async (m) => {
-                if (m.key.remoteJid === dest && m.key.fromMe === false) {
-                    // Check if a document was sent and it's a CSV file
-                    if (m.message && m.message.documentMessage) {
-                        const doc = m.message.documentMessage;
-                        if (doc.mimetype === 'text/csv' || 
-                            doc.mimetype === 'application/csv' ||
-                            doc.mimetype === 'text/comma-separated-values' ||
-                            doc.mimetype === 'application/vnd.ms-excel' ||
-                            doc.fileName?.toLowerCase().endsWith('.csv')) {
-                            // Remove the listener since we got what we wanted
-                            zk.ev.off('messages.upsert', listener);
-                            
-                            try {
-                                // Notify that we've received the file
-                                await repondre("📄 CSV file received! Processing contacts...");
-                                
-                                // Download the document
-                                const buffer = await zk.downloadMediaMessage(m);
-                                const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
-                                fs.writeFileSync(csvPath, buffer);
-                                
-                                // Process the CSV file
-                                resolve(csvPath);
-                            } catch (error) {
-                                console.error("Error processing CSV:", error);
-                                await repondre("❌ Error processing the CSV file. Please try again.");
-                                reject(error);
-                            }
-                        } else {
-                            await repondre("⚠️ Please send a valid CSV file.");
-                        }
-                    }
-                }
-            };
-            
-            // Set a timeout to clean up the listener if no CSV is received
-            const timeout = setTimeout(() => {
-                zk.ev.off('messages.upsert', listener);
-                reject(new Error("Timeout waiting for CSV file"));
-            }, 300000); // 5 minutes timeout
-            
-            // Notify user about timeout
-            setTimeout(() => {
-                repondre("⏳ Still waiting for CSV file... You have 4 minutes remaining.");
-            }, 60000); // After 1 minute remind user
-            
-            // Register the listener
-            // Register the listener for new messages
-            const messageHandler = async ({ messages }) => {
-                for (const m of messages) {
+            // No reply, wait for direct upload
+            await repondre("📋 *CSV Contact Processor*\n\nPlease upload your contacts.csv file now.");
+
+            // Setup listener for incoming files
+            const listener = async (msg) => {
+                if (!msg.message || msg.key.fromMe) return;
+
+                // Check if it's a document
+                const doc = msg.message.documentMessage;
+                if (doc && (doc.fileName?.toLowerCase().endsWith('.csv') || 
+                           doc.mimetype === 'text/csv' ||
+                           doc.mimetype === 'application/csv')) {
+                    // Remove listener
+                    zk.ev.off('messages.upsert', handler);
+                    clearTimeout(timeout);
+
+                    await repondre("📄 Processing your CSV file...");
+
                     try {
-                        await listener(m);
-                    } catch (err) {
-                        console.error("Error in message listener:", err);
+                        // Download the file
+                        const buffer = await zk.downloadMediaMessage(msg);
+                        const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                        fs.writeFileSync(csvPath, buffer);
+
+                        // Process the CSV
+                        await processCSV(csvPath);
+                    } catch (error) {
+                        console.error("Error processing direct upload:", error);
+                        await repondre("❌ Error processing your file. Please try again.");
                     }
                 }
             };
-            
-            zk.ev.on('messages.upsert', messageHandler);
-            
-            // Also clean up the handler when done
-            setTimeout(() => {
-                zk.ev.off('messages.upsert', messageHandler);
-            }, 300000); // 5 minutes timeout
-        });
-    };
-    
-    // Function to process CSV file
-    const processCSVFile = async (csvPath) => {
-        // Process the contacts
-        const validContacts = [];
-        const corruptedContacts = [];
-        
-        try {
-            console.log("Starting to process CSV file:", csvPath);
-            // Check if file exists and has content
-            if (!fs.existsSync(csvPath)) {
-                await repondre("❌ CSV file does not exist at path: " + csvPath);
-                return;
-            }
-            
-            const fileStats = fs.statSync(csvPath);
-            console.log("CSV file size:", fileStats.size, "bytes");
-            
-            if (fileStats.size === 0) {
-                await repondre("❌ CSV file is empty. Please try uploading a valid CSV file.");
-                return;
-            }
-            
-            await repondre("📊 Starting to process CSV file of size: " + fileStats.size + " bytes");
-        
-        // Read and parse CSV manually
-        const fileContent = fs.readFileSync(csvPath, 'utf8');
-        const lines = fileContent.split(/\r?\n/);
-        const headers = lines[0].split(',');
-        
-        // Find phone number column index
-        let phoneColumnIndices = [];
-        headers.forEach((header, index) => {
-            if (header.toLowerCase().includes('phone') || 
-                header.toLowerCase().includes('telephone') || 
-                header.toLowerCase().includes('mobile') || 
-                header.toLowerCase().includes('cell')) {
-                phoneColumnIndices.push(index);
-            }
-        });
-        
-        // Process each line (skip header)
-        for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue; // Skip empty lines
-            
-            // Handle commas within quotes
-            let row = [];
-            let insideQuotes = false;
-            let currentValue = '';
-            
-            for (let char of lines[i]) {
-                if (char === '"' && (currentValue.length === 0 || currentValue[currentValue.length - 1] !== '\\')) {
-                    insideQuotes = !insideQuotes;
-                } else if (char === ',' && !insideQuotes) {
-                    row.push(currentValue);
-                    currentValue = '';
-                } else {
-                    currentValue += char;
-                }
-            }
-            row.push(currentValue); // Push the last value
-            
-            // Create an object from the row
-            const contact = {};
-            for (let j = 0; j < headers.length; j++) {
-                if (j < row.length) {
-                    contact[headers[j]] = row[j];
-                } else {
-                    contact[headers[j]] = '';
-                }
-            }
-            
-            // Extract phone number
-            let phoneNumber = '';
-            for (const index of phoneColumnIndices) {
-                if (index < row.length && row[index]) {
-                    phoneNumber = row[index].toString().trim();
-                    // Remove quotes if present
-                    phoneNumber = phoneNumber.replace(/^"|"$/g, '');
-                    if (phoneNumber) break;
-                }
-            }
-            
-            // If no phone number found in designated columns, look for anything that looks like a phone number
-            if (!phoneNumber) {
-                for (const value of row) {
-                    const cleanedValue = value.toString().trim().replace(/^"|"$/g, '');
-                    // Check if value looks like a phone number
-                    if (/(?:\+?\d{10,15}|\+?\d{1,3}[-\s]?\d{3,4}[-\s]?\d{4,7})/.test(cleanedValue)) {
-                        phoneNumber = cleanedValue;
-                        break;
+
+            // Setup message handler
+            const handler = ({ messages }) => {
+                for (const msg of messages) {
+                    if (msg.key.remoteJid === dest) {
+                        listener(msg).catch(console.error);
                     }
                 }
+            };
+
+            // Register listener
+            zk.ev.on('messages.upsert', handler);
+
+            // Setup timeout
+            const timeout = setTimeout(() => {
+                zk.ev.off('messages.upsert', handler);
+                repondre("⏱️ Time expired. Please try again with `.thecsv`.");
+            }, 300000); // 5 minute timeout
+        }
+    } catch (error) {
+        console.error("Error in main command handler:", error);
+        await repondre("❌ An error occurred. Please try again or send the CSV file directly.");
+    }
+
+    // Process CSV function
+    async function processCSV(csvPath) {
+        try {
+            const validContacts = [];
+            const invalidContacts = [];
+
+            // Read file
+            const content = fs.readFileSync(csvPath, 'utf8');
+            const lines = content.split(/\r?\n/).filter(line => line.trim());
+
+            if (lines.length < 2) {
+                await repondre("❌ CSV file is empty or invalid.");
+                return;
             }
-            
-            // Skip entries without phone numbers
-            if (!phoneNumber) {
-                corruptedContacts.push({
-                    ...contact,
-                    reason: 'No phone number found'
-                });
-                continue;
-            }
-            
-            // Clean the phone number: remove non-digit chars except + at the beginning
-            phoneNumber = phoneNumber.replace(/\s+/g, '');
-            phoneNumber = phoneNumber.replace(/[^0-9+]/g, '');
-            if (phoneNumber.startsWith('+')) {
-                phoneNumber = phoneNumber.substring(1);
-            }
-            
-            // If number doesn't have country code (using Kenya 254 as default)
-            if (phoneNumber.length < 10 || !/^[1-9]\d{1,3}/.test(phoneNumber)) {
-                if (phoneNumber.startsWith('0')) {
-                    phoneNumber = '254' + phoneNumber.substring(1);
-                } else {
-                    phoneNumber = '254' + phoneNumber;
+
+            // Parse headers
+            const headers = lines[0].split(',');
+
+            // Find phone column
+            const phoneColumns = headers.map((header, index) => {
+                if (/phone|mobile|cell|contact|tel/i.test(header)) {
+                    return index;
                 }
+                return -1;
+            }).filter(idx => idx !== -1);
+
+            if (phoneColumns.length === 0) {
+                await repondre("❌ Could not find a phone number column in your CSV.");
+                return;
             }
-            
-            // Check if the number is valid (at least 10 digits, not more than 15)
-            if (phoneNumber.length >= 10 && phoneNumber.length <= 15) {
-                // Check if it's a WhatsApp number
+
+            // Process rows
+            await repondre(`Found ${lines.length-1} contacts in CSV. Processing...`);
+
+            let processedCount = 0;
+            for (let i = 1; i < lines.length; i++) {
+                const row = parseCSVLine(lines[i]);
+                if (!row.length) continue;
+
+                // Extract phone from possible columns
+                let phone = '';
+                for (const colIdx of phoneColumns) {
+                    if (colIdx < row.length && row[colIdx]) {
+                        phone = row[colIdx].replace(/[^0-9+]/g, '');
+                        if (phone) break;
+                    }
+                }
+
+                if (!phone) {
+                    invalidContacts.push({ row, reason: 'No phone number found' });
+                    continue;
+                }
+
+                // Format phone number
+                if (phone.startsWith('0')) {
+                    phone = '254' + phone.substring(1);
+                } else if (!phone.startsWith('+') && !(/^\d{1,3}/).test(phone)) {
+                    phone = '254' + phone;
+                }
+
+                if (phone.startsWith('+')) {
+                    phone = phone.substring(1);
+                }
+
+                // Check if it's a valid WhatsApp number
                 try {
-                    const [result] = await zk.onWhatsApp(phoneNumber + '@s.whatsapp.net');
+                    const [result] = await zk.onWhatsApp(phone + '@s.whatsapp.net');
                     if (result && result.exists) {
                         validContacts.push({
-                            ...contact,
-                            cleanedNumber: phoneNumber,
-                            jid: result.jid
+                            phone: phone,
+                            jid: result.jid,
+                            data: row.reduce((obj, val, idx) => {
+                                if (idx < headers.length) {
+                                    obj[headers[idx]] = val;
+                                }
+                                return obj;
+                            }, {})
                         });
                     } else {
-                        corruptedContacts.push({
-                            ...contact,
-                            cleanedNumber: phoneNumber,
-                            reason: 'Not registered on WhatsApp'
+                        invalidContacts.push({ 
+                            phone: phone, 
+                            reason: 'Not on WhatsApp',
+                            data: row.reduce((obj, val, idx) => {
+                                if (idx < headers.length) {
+                                    obj[headers[idx]] = val;
+                                }
+                                return obj;
+                            }, {})
                         });
                     }
                 } catch (error) {
-                    console.error("Error checking WhatsApp number:", error);
-                    corruptedContacts.push({
-                        ...contact,
-                        cleanedNumber: phoneNumber,
-                        reason: 'Error checking number'
-                    });
+                    invalidContacts.push({ phone: phone, reason: 'Error checking', data: row });
                 }
-            } else {
-                corruptedContacts.push({
-                    ...contact,
-                    cleanedNumber: phoneNumber,
-                    reason: 'Invalid number format'
-                });
+
+                // Progress updates
+                processedCount++;
+                if (processedCount % 10 === 0) {
+                    await repondre(`Processing: ${processedCount}/${lines.length-1} contacts checked.`);
+                }
             }
-            
-            // Show processing progress every 10 contacts
-            if ((validContacts.length + corruptedContacts.length) % 10 === 0) {
-                await repondre(`Processing... Checked ${validContacts.length + corruptedContacts.length} contacts so far.`);
-            }
-        }
-        
-        // Save valid contacts to a file
-        const validContactsPath = path.join(__dirname, '..', 'valid_contacts.json');
-        fs.writeFileSync(validContactsPath, JSON.stringify(validContacts, null, 2));
-        
-        // Save corrupted contacts to a file
-        const corruptedContactsPath = path.join(__dirname, '..', 'corrupted_contacts.json');
-        fs.writeFileSync(corruptedContactsPath, JSON.stringify(corruptedContacts, null, 2));
-        
-        // Clean up the temporary CSV file
+
+            // Save results
+            const validPath = path.join(__dirname, '..', 'valid_contacts.json');
+            const invalidPath = path.join(__dirname, '..', 'invalid_contacts.json');
+
+            fs.writeFileSync(validPath, JSON.stringify(validContacts, null, 2));
+            fs.writeFileSync(invalidPath, JSON.stringify(invalidContacts, null, 2));
+
+            // Clean up
             fs.unlinkSync(csvPath);
-            
-            // Send the results
-            await repondre(`📊 *CSV Processing Complete*\n\n` +
-                `✅ Valid WhatsApp Contacts: *${validContacts.length}*\n` +
-                `❌ Invalid/Non-WhatsApp Contacts: *${corruptedContacts.length}*\n\n` +
-                `The contacts have been processed and saved. Valid contacts are stored in valid_contacts.json and corrupted ones in corrupted_contacts.json.`);
-                
-            // Send the valid contacts file if there are any
+
+            // Report results
+            await repondre(`✅ Processing complete!\n\n• Valid WhatsApp contacts: *${validContacts.length}*\n• Invalid contacts: *${invalidContacts.length}*`);
+
+            // Send result files
             if (validContacts.length > 0) {
                 await zk.sendMessage(dest, {
-                    document: fs.readFileSync(validContactsPath),
+                    document: fs.readFileSync(validPath),
                     mimetype: 'application/json',
                     fileName: 'valid_contacts.json',
                     caption: `✅ ${validContacts.length} valid WhatsApp contacts`
                 });
             }
-            
-            // Send the corrupted contacts file if there are any
-            if (corruptedContacts.length > 0) {
+
+            if (invalidContacts.length > 0) {
                 await zk.sendMessage(dest, {
-                    document: fs.readFileSync(corruptedContactsPath),
+                    document: fs.readFileSync(invalidPath),
                     mimetype: 'application/json',
-                    fileName: 'corrupted_contacts.json',
-                    caption: `❌ ${corruptedContacts.length} invalid or non-WhatsApp contacts`
+                    fileName: 'invalid_contacts.json',
+                    caption: `❌ ${invalidContacts.length} invalid/non-WhatsApp contacts`
                 });
             }
-            
         } catch (error) {
-            console.error("Error processing CSV:", error);
-            await repondre("❌ An error occurred while processing the CSV file. Please try again.");
+            console.error("CSV processing error:", error);
+            await repondre("❌ Error processing CSV: " + error.message);
         }
-    };
-    
-    try {
-        // If we didn't already process a reply to a file, wait for the CSV file
-        if (!(quotedMsg && quotedMsg.documentMessage)) {
-            await repondre("📋 *CSV Contact Processor*\n\n📤 Please upload your contacts.csv file now.\n\n⏱️ Waiting for your file... (5 minutes timeout)");
-            
-            try {
-                const csvPath = await waitForCSV();
-                await processCSVFile(csvPath);
-            } catch (waitError) {
-                console.error("Error while waiting for CSV:", waitError);
-                await repondre("⏱️ Time expired or error occurred. Please try uploading your CSV file again with `.thecsv` command.");
+    }
+
+    // Helper to parse CSV lines with quotes correctly
+    function parseCSVLine(line) {
+        const result = [];
+        let inQuotes = false;
+        let currentValue = '';
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+
+            if (char === '"' && (i === 0 || line[i-1] !== '\\')) {
+                inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+                result.push(currentValue.trim().replace(/^"|"$/g, ''));
+                currentValue = '';
+            } else {
+                currentValue += char;
             }
         }
-    } catch (error) {
-        console.error("Error in CSV command:", error);
-        await repondre("❌ An error occurred in the CSV processor. Please try one of these methods:\n\n1️⃣ Send `.thecsv` and then upload your CSV file\n2️⃣ Forward a CSV file and then reply to it with `.thecsv`\n\nMake sure your file is a valid CSV format with contact numbers.");
+
+        result.push(currentValue.trim().replace(/^"|"$/g, ''));
+        return result;
     }
 });
-
-// Add helper functions to improve media handling
-zk.getQuotedMessage = async (message) => {
-    try {
-        const { quoted, msg } = message;
-        
-        if (quoted) {
-            return quoted;
-        }
-        
-        if (message.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
-            const context = message.message.extendedTextMessage.contextInfo;
-            return {
-                key: {
-                    remoteJid: message.key.remoteJid,
-                    id: context.stanzaId,
-                    participant: context.participant
-                },
-                message: context.quotedMessage
-            };
-        }
-        
-        throw new Error("No quoted message found");
-    } catch (error) {
-        console.error("Error getting quoted message:", error);
-        throw error;
-    }
-};
-
-// Add this method to the zk object to help load messages by ID
-zk.loadMessage = async (jid, id) => {
-    try {
-        // Try using the built-in loadMessage if it exists
-        if (typeof zk.messageStore?.loadMessage === 'function') {
-            return await zk.messageStore.loadMessage(jid, id);
-        }
-        
-        // Fallback: Try to construct a message from the store
-        const msg = {
-            key: {
-                remoteJid: jid,
-                id: id
-            }
-        };
-        
-        return msg;
-    } catch (error) {
-        console.error("Error loading message:", error);
-        return null;
-    }
-};
