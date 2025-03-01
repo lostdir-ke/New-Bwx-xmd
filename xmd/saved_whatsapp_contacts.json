@@ -2,5 +2,6 @@
 {
   "whatsappUsers": [],
   "nonWhatsappUsers": [],
+  "messageSentTo": [],
   "lastUpdated": null
 }

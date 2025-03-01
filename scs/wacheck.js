@@ -27,6 +27,7 @@ function loadSavedContacts() {
         return {
             whatsappUsers: [],
             nonWhatsappUsers: [],
+            messageSentTo: [],
             lastUpdated: null
         };
     }
@@ -40,6 +41,7 @@ function saveContacts(whatsappUsers, nonWhatsappUsers) {
         // Merge new data with existing data, avoiding duplicates
         const mergedWhatsappUsers = [...savedData.whatsappUsers];
         const mergedNonWhatsappUsers = [...savedData.nonWhatsappUsers];
+        const messageSentTo = savedData.messageSentTo || [];
         
         // Add new WhatsApp users
         whatsappUsers.forEach(newUser => {
@@ -61,6 +63,7 @@ function saveContacts(whatsappUsers, nonWhatsappUsers) {
         fs.writeFileSync(contactsStoragePath, JSON.stringify({
             whatsappUsers: mergedWhatsappUsers,
             nonWhatsappUsers: mergedNonWhatsappUsers,
+            messageSentTo: messageSentTo,
             lastUpdated: new Date().toISOString()
         }, null, 2));
         
@@ -342,5 +345,156 @@ adams({ nomCom: "walist", categorie: "General" }, async (dest, zk, commandeOptio
     } catch (error) {
         console.error('Error retrieving saved contacts:', error);
         repondre('❌ Error retrieving saved contacts. Please try again later.');
+    }
+});
+
+
+// Function to mark a number as messaged
+function markNumberAsMessaged(phoneNumber) {
+    try {
+        const savedData = loadSavedContacts();
+        if (!savedData.messageSentTo) {
+            savedData.messageSentTo = [];
+        }
+        
+        if (!savedData.messageSentTo.includes(phoneNumber)) {
+            savedData.messageSentTo.push(phoneNumber);
+            
+            fs.writeFileSync(contactsStoragePath, JSON.stringify(savedData, null, 2));
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error marking number as messaged:', error);
+        return false;
+    }
+}
+
+// Function to check if message was already sent to a number
+function wasMessageSent(phoneNumber) {
+    try {
+        const savedData = loadSavedContacts();
+        return (savedData.messageSentTo || []).includes(phoneNumber);
+    } catch (error) {
+        console.error('Error checking if message was sent:', error);
+        return false;
+    }
+}
+
+// Command to broadcast message to all WhatsApp users
+adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commandeOptions) => {
+    const { ms, repondre, arg, superUser } = commandeOptions;
+    
+    // Only allow the bot owner to use this command
+    if (!superUser) {
+        return repondre("❌ Only the bot owner can use this command.");
+    }
+    
+    try {
+        const savedContacts = loadSavedContacts();
+        const whatsappUsers = savedContacts.whatsappUsers || [];
+        
+        if (whatsappUsers.length === 0) {
+            return repondre("❌ No WhatsApp users found in the database. Use .wacheck to add contacts first.");
+        }
+        
+        // Start broadcasting
+        repondre(`🔄 Starting to send messages to ${whatsappUsers.length} WhatsApp contacts...`);
+        
+        let sentCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+        
+        // Custom message to send
+        const baseMessage = "I'm NICHOLAS another status viewer can we be friends. So save my number your already saved.";
+        
+        // Process contacts one by one with random delay
+        for (let i = 0; i < whatsappUsers.length; i++) {
+            const user = whatsappUsers[i];
+            const phoneNumber = user.phoneNumber;
+            const name = user.name || "Friend";
+            
+            // Skip if message was already sent to this number
+            if (wasMessageSent(phoneNumber)) {
+                skippedCount++;
+                continue;
+            }
+            
+            try {
+                // Personalized message with contact name
+                const personalizedMessage = `Hello ${name}, ${baseMessage}`;
+                
+                // Send message
+                await zk.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text: personalizedMessage });
+                
+                // Mark as sent
+                markNumberAsMessaged(phoneNumber);
+                sentCount++;
+                
+                // Send progress update every 10 messages
+                if (sentCount % 10 === 0) {
+                    await zk.sendMessage(dest, { text: `📤 Progress update: Sent messages to ${sentCount} contacts so far.` });
+                }
+                
+                // Random delay between 1-2 minutes
+                const delaySeconds = Math.floor(Math.random() * 60) + 60; // 60-120 seconds
+                await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+            } catch (error) {
+                console.error(`Error sending message to ${phoneNumber}:`, error);
+                failedCount++;
+            }
+        }
+        
+        // Send final report
+        const report = `📊 *Message Broadcast Report*\n\n` +
+                      `✅ Successfully sent: ${sentCount}\n` +
+                      `⏭️ Skipped (already sent): ${skippedCount}\n` +
+                      `❌ Failed to send: ${failedCount}\n\n` +
+                      `Total WhatsApp contacts: ${whatsappUsers.length}`;
+                      
+        repondre(report);
+    } catch (error) {
+        console.error('Error broadcasting messages:', error);
+        repondre('❌ Error broadcasting messages. Please try again later.');
+    }
+});
+
+// Function to estimate broadcast time
+adams({ nomCom: "wabroadcastinfo", categorie: "General" }, async (dest, zk, commandeOptions) => {
+    const { repondre, superUser } = commandeOptions;
+    
+    if (!superUser) {
+        return repondre("❌ Only the bot owner can use this command.");
+    }
+    
+    try {
+        const savedContacts = loadSavedContacts();
+        const whatsappUsers = savedContacts.whatsappUsers || [];
+        const messageSentTo = savedContacts.messageSentTo || [];
+        
+        const totalContacts = whatsappUsers.length;
+        const pendingContacts = whatsappUsers.filter(user => 
+            !messageSentTo.includes(user.phoneNumber)).length;
+        
+        // Estimate time (average 90 seconds per message)
+        const estimatedMinutes = Math.ceil((pendingContacts * 90) / 60);
+        const estimatedHours = Math.floor(estimatedMinutes / 60);
+        const remainingMinutes = estimatedMinutes % 60;
+        
+        const timeEstimate = estimatedHours > 0 
+            ? `${estimatedHours} hour(s) and ${remainingMinutes} minute(s)` 
+            : `${estimatedMinutes} minute(s)`;
+        
+        const report = `📊 *Broadcast Statistics*\n\n` +
+                      `📱 Total WhatsApp contacts: ${totalContacts}\n` +
+                      `✅ Already messaged: ${messageSentTo.length}\n` +
+                      `⏳ Pending messages: ${pendingContacts}\n\n` +
+                      `⏱️ Estimated time to complete: ${timeEstimate}\n\n` +
+                      `Use *.wabroadcast* command to start sending messages.`;
+                      
+        repondre(report);
+    } catch (error) {
+        console.error('Error getting broadcast info:', error);
+        repondre('❌ Error retrieving broadcast information.');
     }
 });
