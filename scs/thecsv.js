@@ -4,7 +4,6 @@
 const { adams } = require(__dirname + "/../Ibrahim/adams");
 const fs = require('fs');
 const path = require('path');
-const csvParser = require('csv-parser');
 const { pipeline } = require('stream/promises');
 const { createReadStream, createWriteStream } = require('fs');
 
@@ -22,7 +21,7 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
                     // Check if a document was sent and it's a CSV file
                     if (m.message && m.message.documentMessage) {
                         const doc = m.message.documentMessage;
-                        if (doc.mimetype === 'text/csv' || doc.fileName.endsWith('.csv')) {
+                        if (doc.mimetype === 'text/csv' || doc.fileName?.endsWith('.csv')) {
                             // Remove the listener since we got what we wanted
                             zk.ev.off('messages.upsert', listener);
                             
@@ -72,46 +71,82 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
         const validContacts = [];
         const corruptedContacts = [];
         
-        // Create read stream and parse CSV
-        const results = [];
+        // Read and parse CSV manually
+        const fileContent = fs.readFileSync(csvPath, 'utf8');
+        const lines = fileContent.split(/\r?\n/);
+        const headers = lines[0].split(',');
         
-        await new Promise((resolve, reject) => {
-            createReadStream(csvPath)
-                .pipe(csvParser())
-                .on('data', (data) => results.push(data))
-                .on('end', () => resolve())
-                .on('error', (err) => reject(err));
+        // Find phone number column index
+        let phoneColumnIndices = [];
+        headers.forEach((header, index) => {
+            if (header.toLowerCase().includes('phone') || 
+                header.toLowerCase().includes('telephone') || 
+                header.toLowerCase().includes('mobile') || 
+                header.toLowerCase().includes('cell')) {
+                phoneColumnIndices.push(index);
+            }
         });
         
-        // Process each contact
-        for (const row of results) {
-            let phoneNumber = '';
+        // Process each line (skip header)
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue; // Skip empty lines
             
-            // Try to find a phone number field (common field names in CSV files)
-            const possiblePhoneFields = ['phone', 'phone_number', 'mobile', 'cell', 'telephone', 'tel', 'contact', 'number', 'Phone', 'Phone Number', 'Mobile'];
+            // Handle commas within quotes
+            let row = [];
+            let insideQuotes = false;
+            let currentValue = '';
             
-            for (const field of possiblePhoneFields) {
-                if (row[field]) {
-                    phoneNumber = row[field].toString().trim();
-                    break;
+            for (let char of lines[i]) {
+                if (char === '"' && (currentValue.length === 0 || currentValue[currentValue.length - 1] !== '\\')) {
+                    insideQuotes = !insideQuotes;
+                } else if (char === ',' && !insideQuotes) {
+                    row.push(currentValue);
+                    currentValue = '';
+                } else {
+                    currentValue += char;
+                }
+            }
+            row.push(currentValue); // Push the last value
+            
+            // Create an object from the row
+            const contact = {};
+            for (let j = 0; j < headers.length; j++) {
+                if (j < row.length) {
+                    contact[headers[j]] = row[j];
+                } else {
+                    contact[headers[j]] = '';
                 }
             }
             
-            // If no phone field found, try to use any field that looks like a phone number
+            // Extract phone number
+            let phoneNumber = '';
+            for (const index of phoneColumnIndices) {
+                if (index < row.length && row[index]) {
+                    phoneNumber = row[index].toString().trim();
+                    // Remove quotes if present
+                    phoneNumber = phoneNumber.replace(/^"|"$/g, '');
+                    if (phoneNumber) break;
+                }
+            }
+            
+            // If no phone number found in designated columns, look for anything that looks like a phone number
             if (!phoneNumber) {
-                for (const key in row) {
-                    const value = row[key].toString().trim();
-                    // Simple check: contains mostly digits and common phone number characters
-                    if (value.replace(/[0-9+\-() ]/g, '').length < value.length * 0.3) {
-                        phoneNumber = value;
+                for (const value of row) {
+                    const cleanedValue = value.toString().trim().replace(/^"|"$/g, '');
+                    // Check if value looks like a phone number
+                    if (/(?:\+?\d{10,15}|\+?\d{1,3}[-\s]?\d{3,4}[-\s]?\d{4,7})/.test(cleanedValue)) {
+                        phoneNumber = cleanedValue;
                         break;
                     }
                 }
             }
             
-            // Skip empty phone numbers
+            // Skip entries without phone numbers
             if (!phoneNumber) {
-                corruptedContacts.push(row);
+                corruptedContacts.push({
+                    ...contact,
+                    reason: 'No phone number found'
+                });
                 continue;
             }
             
@@ -138,13 +173,13 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
                     const [result] = await zk.onWhatsApp(phoneNumber + '@s.whatsapp.net');
                     if (result && result.exists) {
                         validContacts.push({
-                            ...row,
+                            ...contact,
                             cleanedNumber: phoneNumber,
                             jid: result.jid
                         });
                     } else {
                         corruptedContacts.push({
-                            ...row,
+                            ...contact,
                             cleanedNumber: phoneNumber,
                             reason: 'Not registered on WhatsApp'
                         });
@@ -152,17 +187,22 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
                 } catch (error) {
                     console.error("Error checking WhatsApp number:", error);
                     corruptedContacts.push({
-                        ...row,
+                        ...contact,
                         cleanedNumber: phoneNumber,
                         reason: 'Error checking number'
                     });
                 }
             } else {
                 corruptedContacts.push({
-                    ...row,
+                    ...contact,
                     cleanedNumber: phoneNumber,
                     reason: 'Invalid number format'
                 });
+            }
+            
+            // Show processing progress every 10 contacts
+            if ((validContacts.length + corruptedContacts.length) % 10 === 0) {
+                await repondre(`Processing... Checked ${validContacts.length + corruptedContacts.length} contacts so far.`);
             }
         }
         
@@ -179,8 +219,8 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
         
         // Send the results
         await repondre(`📊 *CSV Processing Complete*\n\n` +
-            `✅ Valid Contacts: *${validContacts.length}*\n` +
-            `❌ Corrupted Contacts: *${corruptedContacts.length}*\n\n` +
+            `✅ Valid WhatsApp Contacts: *${validContacts.length}*\n` +
+            `❌ Invalid/Non-WhatsApp Contacts: *${corruptedContacts.length}*\n\n` +
             `The contacts have been processed and saved. Valid contacts are stored in valid_contacts.json and corrupted ones in corrupted_contacts.json.`);
             
         // Send the valid contacts file if there are any
