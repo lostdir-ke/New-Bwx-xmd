@@ -14,13 +14,18 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
     
     // Check if command is a reply to a document
     const quotedMsg = ms.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-    if (quotedMsg && quotedMsg.documentMessage) {
-        const doc = quotedMsg.documentMessage;
-        if (doc.mimetype === 'text/csv' || 
-            doc.mimetype === 'application/csv' ||
-            doc.mimetype === 'text/comma-separated-values' ||
-            doc.mimetype === 'application/vnd.ms-excel' ||
-            doc.fileName?.toLowerCase().endsWith('.csv')) {
+    
+    // Check if there's a quoted message and if it contains a document
+    if (quotedMsg) {
+        // First check if there's an actual document in the quoted message
+        if (quotedMsg.documentMessage) {
+            const doc = quotedMsg.documentMessage;
+            // Check if it's a CSV file
+            if (doc.mimetype === 'text/csv' || 
+                doc.mimetype === 'application/csv' ||
+                doc.mimetype === 'text/comma-separated-values' ||
+                doc.mimetype === 'application/vnd.ms-excel' ||
+                doc.fileName?.toLowerCase().endsWith('.csv')) {
             
             try {
                 await repondre("📄 CSV file detected in your reply! Processing contacts...");
@@ -51,7 +56,11 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
             await repondre("⚠️ The file you replied to is not a valid CSV file.");
             return;
         }
+    } else {
+        await repondre("⚠️ You replied to a message that doesn't contain a CSV file. Please reply to a message with a CSV file attachment.");
+        return;
     }
+}
     
     // Set up a one-time message event listener for the CSV file
     const waitForCSV = async () => {
@@ -301,7 +310,7 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
     try {
         // If we didn't already process a reply to a file, wait for the CSV file
         if (!(quotedMsg && quotedMsg.documentMessage)) {
-            await repondre("⏱️ Waiting for your CSV file... Please send it within 5 minutes.");
+            await repondre("📋 *CSV Contact Processor*\nEither:\n1. Upload a contacts.csv file now, or\n2. Reply to an existing CSV file with .thecsv\n\n⏱️ Waiting for your CSV file... Please send it within 5 minutes.");
             const csvPath = await waitForCSV();
             await processCSVFile(csvPath);
         }
