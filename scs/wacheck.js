@@ -390,6 +390,11 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
         return repondre("❌ Only the bot owner can use this command.");
     }
     
+    // Check if a broadcast is already running
+    if (isBroadcastRunning) {
+        return repondre("⚠️ A broadcast is already in progress. Use *.wastop* to stop it first.");
+    }
+    
     try {
         const savedContacts = loadSavedContacts();
         const whatsappUsers = savedContacts.whatsappUsers || [];
@@ -399,17 +404,27 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
         }
         
         // Start broadcasting
-        repondre(`🔄 Starting to send messages to ${whatsappUsers.length} WhatsApp contacts...`);
+        repondre(`🔄 Starting to send messages to ${whatsappUsers.length} WhatsApp contacts...\nUse *.wastop* to stop the broadcast at any time.`);
+        
+        // Set the broadcast flag to true
+        isBroadcastRunning = true;
         
         let sentCount = 0;
         let skippedCount = 0;
         let failedCount = 0;
+        let stoppedEarly = false;
         
         // Custom message to send
         const baseMessage = "I'm NICHOLAS, another status viewer. Can we be friends? Please save my number. Your contact is already saved in my phone.";
         
         // Process contacts one by one with random delay
         for (let i = 0; i < whatsappUsers.length; i++) {
+            // Check if the broadcast should be stopped
+            if (!isBroadcastRunning) {
+                stoppedEarly = true;
+                break;
+            }
+            
             const user = whatsappUsers[i];
             const phoneNumber = user.phoneNumber;
             const name = user.name || "Friend";
@@ -432,7 +447,7 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
                 sentCount++;
                 
                 // Send progress update every 10 messages
-                if (sentCount % 10 === 0) {
+                if (sentCount % 10 === 0 && isBroadcastRunning) {
                     await zk.sendMessage(dest, { text: `📤 Progress update: Sent messages to ${sentCount} contacts so far.` });
                 }
                 
@@ -445,19 +460,32 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
             }
         }
         
+        // Reset the broadcast flag
+        isBroadcastRunning = false;
+        
         // Send final report
-        const report = `📊 *Message Broadcast Report*\n\n` +
-                      `✅ Successfully sent: ${sentCount}\n` +
-                      `⏭️ Skipped (already sent): ${skippedCount}\n` +
-                      `❌ Failed to send: ${failedCount}\n\n` +
-                      `Total WhatsApp contacts: ${whatsappUsers.length}`;
+        let report = `📊 *Message Broadcast Report*\n\n` +
+                     `✅ Successfully sent: ${sentCount}\n` +
+                     `⏭️ Skipped (already sent): ${skippedCount}\n` +
+                     `❌ Failed to send: ${failedCount}\n\n` +
+                     `Total WhatsApp contacts: ${whatsappUsers.length}`;
+        
+        if (stoppedEarly) {
+            report += `\n\n⚠️ The broadcast was stopped manually.`;
+        }
                       
         repondre(report);
     } catch (error) {
+        // Reset the broadcast flag in case of error
+        isBroadcastRunning = false;
+        
         console.error('Error broadcasting messages:', error);
         repondre('❌ Error broadcasting messages. Please try again later.');
     }
 });
+
+// Global variable to track if broadcast is running and should continue
+let isBroadcastRunning = false;
 
 // Function to estimate broadcast time
 adams({ nomCom: "wabroadcastinfo", categorie: "General" }, async (dest, zk, commandeOptions) => {
@@ -490,11 +518,31 @@ adams({ nomCom: "wabroadcastinfo", categorie: "General" }, async (dest, zk, comm
                       `✅ Already messaged: ${messageSentTo.length}\n` +
                       `⏳ Pending messages: ${pendingContacts}\n\n` +
                       `⏱️ Estimated time to complete: ${timeEstimate}\n\n` +
-                      `Use *.wabroadcast* command to start sending messages.`;
+                      `Use *.wabroadcast* command to start sending messages.\n` +
+                      `Use *.wastop* command to stop an ongoing broadcast.`;
                       
         repondre(report);
     } catch (error) {
         console.error('Error getting broadcast info:', error);
         repondre('❌ Error retrieving broadcast information.');
     }
+});
+
+// Command to stop the broadcast process
+adams({ nomCom: "wastop", categorie: "General" }, async (dest, zk, commandeOptions) => {
+    const { repondre, superUser } = commandeOptions;
+    
+    // Only allow the bot owner to use this command
+    if (!superUser) {
+        return repondre("❌ Only the bot owner can use this command.");
+    }
+    
+    if (!isBroadcastRunning) {
+        return repondre("⚠️ There is no active broadcast running at the moment.");
+    }
+    
+    // Set the flag to false to stop the broadcast
+    isBroadcastRunning = false;
+    
+    repondre("🛑 *Broadcast Stopped*\n\nThe message broadcast has been stopped. Any messages currently being sent will complete, but no new messages will be sent.\n\nUse *.wabroadcast* to start a new broadcast.");
 });
