@@ -166,7 +166,7 @@ adams({ nomCom: "wacheck", categorie: "General" }, async (dest, zk, commandeOpti
     }
 });
 
-// Function to handle bulk checking of contacts
+// Function to handle bulk checking of contacts with improved speed
 async function handleBulkCheck(inputText, zk, dest, repondre) {
     // Parse the input text to extract contacts
     const lines = inputText.split('\n').filter(line => line.trim() !== '');
@@ -176,7 +176,7 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
     }
     
     // Initial notification
-    repondre(`🔍 Processing *${lines.length}* contacts for WhatsApp verification...\nThis might take some time, please wait.`);
+    repondre(`🔍 Processing *${lines.length}* contacts for WhatsApp verification...\nOptimized for faster processing.`);
     
     // Send a typing indicator
     await zk.sendPresenceUpdate('composing', dest);
@@ -186,12 +186,15 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
     const nonWhatsappUsers = [];
     let failedChecks = 0;
     
-    // Process each contact
+    // Set a batch size for bulk processing
+    const BATCH_SIZE = 20; // Process more numbers before sending a progress update
+    const RATE_LIMIT_DELAY = 500; // Smaller delay (in ms) to avoid rate limiting
+    
+    // Process contacts one by one
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         
-        // Extract name and phone number
-        // Assuming format is "Name,Phone Number" but handling variations
+        // Extract name and phone number with optimized parsing
         let name, phoneNumber;
         
         if (line.includes(',')) {
@@ -205,11 +208,11 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
             phoneNumber = line.trim();
         }
         
-        // Clean up the phone number
-        phoneNumber = phoneNumber.replace(/\s+/g, '').replace(/^\+/, '');
+        // Clean up the phone number more efficiently
+        phoneNumber = phoneNumber.replace(/[\s\+\-]/g, '');
         
-        // Add country code if needed
-        if (phoneNumber.length < 10 || !/^[1-9]\d{1,3}/.test(phoneNumber)) {
+        // Add country code if needed (optimization: single regex check)
+        if (!/^[1-9]\d{9,14}$/.test(phoneNumber)) {
             if (phoneNumber.startsWith('0')) {
                 phoneNumber = '254' + phoneNumber.substring(1);
             } else {
@@ -218,12 +221,13 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
         }
         
         try {
-            // Check if number exists on WhatsApp (with slight delay to avoid rate limiting)
-            if (i > 0 && i % 10 === 0) {
-                // Send progress update every 10 contacts
-                repondre(`⏳ Progress: Checked ${i}/${lines.length} contacts...`);
-                // Small delay every 10 checks to avoid rate limiting
-                await new Promise(resolve => setTimeout(resolve, 2000));
+            // Send progress updates at optimized intervals
+            if (i > 0 && i % BATCH_SIZE === 0) {
+                const progressPercentage = Math.floor((i / lines.length) * 100);
+                repondre(`⏳ Progress: ${progressPercentage}% (Checked ${i}/${lines.length} contacts)`);
+                
+                // Small delay every batch to avoid rate limiting, but much shorter
+                await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_DELAY));
             }
             
             const [result] = await zk.onWhatsApp(phoneNumber + '@s.whatsapp.net');
@@ -233,59 +237,83 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
             } else {
                 nonWhatsappUsers.push({ name, phoneNumber });
             }
+            
+            // Add minimal delay between each check to avoid overloading
+            if (i % 5 === 0) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
         } catch (error) {
             console.error(`Error checking number ${phoneNumber}:`, error);
             failedChecks++;
-            // Continue to the next number
+            // Continue to the next number without much delay
         }
     }
     
     // Save contacts to storage
     const savedStats = saveContacts(whatsappUsers, nonWhatsappUsers);
     
-    // Generate report
-    let report = `📊 *WhatsApp Contact Verification Report*\n\n`;
-    report += `✅ *Registered on WhatsApp (${whatsappUsers.length}):*\n`;
+    // Generate report with optimized string building
+    let report = [`📊 *WhatsApp Contact Verification Report*\n\n`];
+    report.push(`✅ *Registered on WhatsApp (${whatsappUsers.length}):*\n`);
     
     if (whatsappUsers.length > 0) {
-        whatsappUsers.forEach((user, index) => {
-            report += `${index + 1}. ${user.name}: +${user.phoneNumber}\n`;
-        });
+        // Optimize by building string in chunks
+        const chunks = [];
+        for (let i = 0; i < whatsappUsers.length; i++) {
+            if (i < 100) { // Limit to first 100 to avoid message too long
+                chunks.push(`${i + 1}. ${whatsappUsers[i].name}: +${whatsappUsers[i].phoneNumber}`);
+            } else {
+                chunks.push(`... and ${whatsappUsers.length - 100} more contacts`);
+                break;
+            }
+        }
+        report.push(chunks.join('\n'));
     } else {
-        report += `None of the contacts are registered on WhatsApp.\n`;
+        report.push(`None of the contacts are registered on WhatsApp.`);
     }
     
-    report += `\n❌ *Not Registered on WhatsApp (${nonWhatsappUsers.length}):*\n`;
+    report.push(`\n❌ *Not Registered on WhatsApp (${nonWhatsappUsers.length}):*\n`);
     
     if (nonWhatsappUsers.length > 0) {
-        nonWhatsappUsers.forEach((user, index) => {
-            report += `${index + 1}. ${user.name}: +${user.phoneNumber}\n`;
-        });
+        // Optimize by building string in chunks
+        const chunks = [];
+        for (let i = 0; i < nonWhatsappUsers.length; i++) {
+            if (i < 100) { // Limit to first 100 to avoid message too long
+                chunks.push(`${i + 1}. ${nonWhatsappUsers[i].name}: +${nonWhatsappUsers[i].phoneNumber}`);
+            } else {
+                chunks.push(`... and ${nonWhatsappUsers.length - 100} more contacts`);
+                break;
+            }
+        }
+        report.push(chunks.join('\n'));
     } else {
-        report += `All contacts are registered on WhatsApp.\n`;
+        report.push(`All contacts are registered on WhatsApp.`);
     }
     
     if (failedChecks > 0) {
-        report += `\n⚠️ Failed to check ${failedChecks} contacts due to errors.\n`;
+        report.push(`\n⚠️ Failed to check ${failedChecks} contacts due to errors.`);
     }
     
-    report += `\n📝 *Summary:*\n`;
-    report += `• Total contacts checked: ${lines.length}\n`;
-    report += `• WhatsApp users: ${whatsappUsers.length}\n`;
-    report += `• Non-WhatsApp users: ${nonWhatsappUsers.length}\n`;
-    report += `• Failed checks: ${failedChecks}\n`;
+    report.push(`\n📝 *Summary:*`);
+    report.push(`• Total contacts checked: ${lines.length}`);
+    report.push(`• WhatsApp users: ${whatsappUsers.length}`);
+    report.push(`• Non-WhatsApp users: ${nonWhatsappUsers.length}`);
+    report.push(`• Failed checks: ${failedChecks}`);
     
     if (savedStats) {
-        report += `\n💾 *Saved Contacts Database:*\n`;
-        report += `• Total WhatsApp users saved: ${savedStats.whatsappCount}\n`;
-        report += `• Total non-WhatsApp users saved: ${savedStats.nonWhatsappCount}\n`;
+        report.push(`\n💾 *Saved Contacts Database:*`);
+        report.push(`• Total WhatsApp users saved: ${savedStats.whatsappCount}`);
+        report.push(`• Total non-WhatsApp users saved: ${savedStats.nonWhatsappCount}`);
     }
 
-    // Check if report is too long for WhatsApp (message limit is around 65536 characters)
-    if (report.length > 65000) {
+    // Join report parts for efficiency
+    const finalReport = report.join('\n');
+
+    // Check if report is too long for WhatsApp
+    if (finalReport.length > 65000) {
         // Split report and save to file
         const reportFile = './wa_check_report.txt';
-        fs.writeFileSync(reportFile, report);
+        fs.writeFileSync(reportFile, finalReport);
         
         // Send file instead
         await zk.sendMessage(dest, {
@@ -299,7 +327,7 @@ async function handleBulkCheck(inputText, zk, dest, repondre) {
         fs.unlinkSync(reportFile);
     } else {
         // Send report as message with saved notification
-        repondre(report + "\n\n_All contacts have been saved for reference._");
+        repondre(finalReport + "\n\n_All contacts have been saved for reference._");
     }
 }
 
@@ -572,7 +600,7 @@ adams({ nomCom: "wastop", categorie: "General" }, async (dest, zk, commandeOptio
     repondre("🛑 *Broadcast Stopped*\n\nThe message broadcast has been stopped. Any messages currently being sent will complete, but no new messages will be sent.\n\nUse *.wabroadcast* to start a new broadcast.");
 });
 
-// Command to check WhatsApp contacts from a URL containing a text file
+// Command to check WhatsApp contacts from a URL containing a text file (optimized)
 adams({ nomCom: "wacheckurl", categorie: "General" }, async (dest, zk, commandeOptions) => {
     const { ms, repondre, arg } = commandeOptions;
     
@@ -583,26 +611,52 @@ adams({ nomCom: "wacheckurl", categorie: "General" }, async (dest, zk, commandeO
     const url = arg[0];
     
     // Send processing notification
-    repondre(`🔍 Attempting to download contacts from URL:\n${url}\n\nPlease wait...`);
+    repondre(`🔍 Downloading contacts from URL:\n${url}\n\nUsing optimized processing...`);
     
     try {
-        // Download the file content
+        // Download the file content with optimized settings
         const response = await axios.get(url, {
-            timeout: 15000,
-            responseType: 'text'
+            timeout: 20000, // Increased timeout for larger files
+            responseType: 'text',
+            headers: {
+                'Accept-Encoding': 'gzip, deflate, br', // Support compressed responses
+                'User-Agent': 'WhatsApp-Contact-Checker/1.0' // Custom user agent
+            },
+            maxContentLength: 5 * 1024 * 1024 // 5MB max to handle larger files
         });
         
         if (!response.data || response.data.trim() === '') {
             return repondre("❌ The downloaded file is empty or invalid. Please check the URL and try again.");
         }
         
-        // Process the downloaded content
-        repondre(`✅ File downloaded successfully! Processing contacts...`);
+        // Quick check of file size
+        const contentLength = response.headers['content-length'];
+        const sizeInKB = contentLength ? Math.round(parseInt(contentLength) / 1024) : 'unknown';
         
-        // Process the content the same way as .wacheck bulk check
+        // Process the downloaded content with size info
+        repondre(`✅ File downloaded successfully! (${sizeInKB}KB)\nProcessing contacts with optimized speed...`);
+        
+        // Process the content with our optimized bulk check function
         await handleBulkCheck(response.data, zk, dest, repondre);
     } catch (error) {
         console.error("Error downloading or processing file:", error);
-        return repondre(`❌ Failed to download or process the file. Error: ${error.message || "Unknown error"}\n\nPlease verify the URL is correct and accessible.`);
+        
+        // More detailed error reporting
+        let errorMessage = "❌ Failed to download or process the file.";
+        
+        if (error.code === 'ECONNABORTED') {
+            errorMessage += "\n\nThe request timed out. The file might be too large or the server is slow.";
+        } else if (error.response) {
+            // The server responded with a status code outside the 2xx range
+            errorMessage += `\n\nServer responded with status: ${error.response.status}`;
+        } else if (error.request) {
+            // The request was made but no response was received
+            errorMessage += "\n\nNo response received from the server. Check if the URL is correct.";
+        } else {
+            // Something else happened while setting up the request
+            errorMessage += `\n\nError: ${error.message || "Unknown error"}`;
+        }
+        
+        return repondre(errorMessage + "\n\nPlease verify the URL is correct and accessible.");
     }
 });
