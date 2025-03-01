@@ -406,7 +406,7 @@ adams({ nomCom: "wabroadcast", categorie: "General" }, async (dest, zk, commande
         let failedCount = 0;
         
         // Custom message to send
-        const baseMessage = "I'm NICHOLAS another status viewer can we be friends. So save my number your already saved.";
+        const baseMessage = "I'm NICHOLAS, another status viewer. Can we be friends? Please save my number. Your contact is already saved in my phone.";
         
         // Process contacts one by one with random delay
         for (let i = 0; i < whatsappUsers.length; i++) {
