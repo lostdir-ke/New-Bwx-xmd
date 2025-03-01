@@ -30,47 +30,48 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
             try {
                 await repondre("📄 CSV file detected in your reply! Processing contacts...");
                 
-                // Get the contextInfo to find the original message
-                const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
-                if (!contextInfo) {
-                    await repondre("❌ Could not find the context information for the quoted message.");
+                let buffer;
+                try {
+                    // Try to download the document directly from quoted message
+                    const quotedMsg = await zk.getQuotedMessage(ms);
+                    buffer = await zk.downloadMediaMessage(quotedMsg);
+                } catch (firstError) {
+                    console.log("Direct method failed, trying alternative:", firstError);
+                    
+                    try {
+                        // Get the contextInfo from the message
+                        const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
+                        if (!contextInfo) {
+                            await repondre("❌ Could not access the CSV file in your reply. Please try uploading it directly.");
+                            return;
+                        }
+                        
+                        // Try downloading using quoted message info
+                        buffer = await zk.downloadMediaMessage({
+                            message: contextInfo.quotedMessage,
+                            key: {
+                                remoteJid: dest,
+                                id: contextInfo.stanzaId
+                            }
+                        });
+                    } catch (secondError) {
+                        console.log("Second method failed, trying last resort:", secondError);
+                        
+                        // Last resort method
+                        buffer = await zk.downloadMediaMessage(ms);
+                    }
+                }
+                
+                if (!buffer) {
+                    await repondre("❌ Failed to download the CSV file. Please try uploading it directly.");
                     return;
                 }
                 
-                // Construct the message object for downloading
-                const quotedM = {
-                    key: {
-                        remoteJid: dest,
-                        id: contextInfo.stanzaId
-                    },
-                    message: {
-                        documentMessage: doc
-                    }
-                };
+                const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                fs.writeFileSync(csvPath, buffer);
                 
-                try {
-                    // Download the document
-                    const buffer = await zk.downloadMediaMessage(quotedM);
-                    const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
-                    fs.writeFileSync(csvPath, buffer);
-                    
-                    // Process the CSV file directly
-                    return await processCSVFile(csvPath);
-                } catch (dlError) {
-                    console.error("Error downloading CSV:", dlError);
-                    // Try an alternative approach with a direct quoted message
-                    const directQuoted = await zk.downloadMediaMessage({
-                        message: contextInfo.quotedMessage,
-                        key: {
-                            remoteJid: dest,
-                            id: contextInfo.stanzaId
-                        }
-                    });
-                    
-                    const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
-                    fs.writeFileSync(csvPath, directQuoted);
-                    return await processCSVFile(csvPath);
-                }
+                // Process the CSV file
+                return await processCSVFile(csvPath);
             } catch (error) {
                 console.error("Error processing CSV from reply:", error);
                 await repondre("❌ Error processing the CSV file from your reply. Please try again with direct upload.");
@@ -346,6 +347,33 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
         }
     } catch (error) {
         console.error("Error in CSV command:", error);
-        await repondre("❌ An error occurred in the CSV processor. Please try again by sending `.thecsv` and then uploading your contacts.csv file.");
+        await repondre("❌ An error occurred in the CSV processor. Please try one of these methods:\n\n1️⃣ Send `.thecsv` and then upload your CSV file\n2️⃣ Forward a CSV file and then reply to it with `.thecsv`\n\nMake sure your file is a valid CSV format with contact numbers.");
     }
 });
+
+// Add helper function to get quoted message more reliably
+zk.getQuotedMessage = async (message) => {
+    try {
+        const { quoted, msg } = message;
+        
+        if (quoted) {
+            return quoted;
+        }
+        
+        if (message.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+            const context = message.message.extendedTextMessage.contextInfo;
+            return {
+                key: {
+                    remoteJid: message.key.remoteJid,
+                    id: context.stanzaId
+                },
+                message: context.quotedMessage
+            };
+        }
+        
+        throw new Error("No quoted message found");
+    } catch (error) {
+        console.error("Error getting quoted message:", error);
+        throw error;
+    }
+};
