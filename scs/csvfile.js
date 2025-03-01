@@ -30,6 +30,20 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                 let documentMsg;
                 let buffer;
                 let fileName = '';
+
+// Function to clean up temporary files
+const cleanupTempFiles = (filePath) => {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`Cleaned up temporary file: ${filePath}`);
+    }
+  } catch (cleanupError) {
+    console.error("Error during cleanup:", cleanupError);
+  }
+};
+
+
                 
                 if (ms.quoted) {
                     // Direct quoted message approach
@@ -47,7 +61,17 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                             
                             // First try with downloadAndSaveMediaMessage 
                             const filePath = await zk.downloadAndSaveMediaMessage(mediaMessage, 'temp');
-                            buffer = fs.readFileSync(filePath);
+                            if (!fs.existsSync(filePath)) {
+                                console.error("Downloaded file doesn't exist at path:", filePath);
+                                throw new Error("File download failed - file not found at expected location");
+                            }
+                            try {
+                                buffer = fs.readFileSync(filePath);
+                                console.log(`Successfully read file (${buffer.length} bytes)`);
+                            } catch (readError) {
+                                console.error("Error reading file:", readError);
+                                throw new Error("Could not read the downloaded file");
+                            }
                             fileName = documentMsg.message.documentMessage.fileName || 'file_' + Date.now() + '.csv';
                         } catch (downloadError) {
                             console.error("Download error:", downloadError);
@@ -156,11 +180,20 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                         };
                         
                         // Download the file using the correct method
-                        const filePath = await zk.downloadAndSaveMediaMessage(mediaMessage, 'temp');
-                        const buffer = fs.readFileSync(filePath);
-                        
-                        // Get file name or create one
-                        let fileName = doc.fileName || 'file_' + Date.now() + '.csv';
+                        try {
+                            const filePath = await zk.downloadAndSaveMediaMessage(mediaMessage, 'temp');
+                            console.log("File saved to:", filePath);
+                            
+                            if (!fs.existsSync(filePath)) {
+                                console.error("Downloaded file doesn't exist at path:", filePath);
+                                throw new Error("File download failed");
+                            }
+                            
+                            const buffer = fs.readFileSync(filePath);
+                            console.log(`Successfully read file (${buffer.length} bytes)`);
+                            
+                            // Get file name or create one
+                            let fileName = doc.fileName || 'file_' + Date.now() + '.csv';
                         
                         // Ensure file has .csv extension if not provided
                         if (!fileName.toLowerCase().endsWith('.csv')) {
@@ -198,7 +231,7 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                         
                     } catch (error) {
                         console.error("Error processing direct upload:", error);
-                        await repondre("❌ Error saving your file. Please try again.");
+                        await repondre(`❌ Error saving your file: ${error.message}\n\nPlease try again.`);
                     }
                 }
             };
