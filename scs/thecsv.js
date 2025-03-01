@@ -25,31 +25,55 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
                 doc.mimetype === 'application/csv' ||
                 doc.mimetype === 'text/comma-separated-values' ||
                 doc.mimetype === 'application/vnd.ms-excel' ||
-                doc.fileName?.toLowerCase().endsWith('.csv')) {
+                (doc.fileName && doc.fileName.toLowerCase().endsWith('.csv'))) {
             
             try {
                 await repondre("📄 CSV file detected in your reply! Processing contacts...");
                 
-                // Get the message that was replied to
+                // Get the contextInfo to find the original message
+                const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
+                if (!contextInfo) {
+                    await repondre("❌ Could not find the context information for the quoted message.");
+                    return;
+                }
+                
+                // Construct the message object for downloading
                 const quotedM = {
+                    key: {
+                        remoteJid: dest,
+                        id: contextInfo.stanzaId
+                    },
                     message: {
                         documentMessage: doc
-                    },
-                    key: {
-                        remoteJid: dest
                     }
                 };
                 
-                // Download the document
-                const buffer = await zk.downloadMediaMessage(quotedM);
-                const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
-                fs.writeFileSync(csvPath, buffer);
-                
-                // Process the CSV file directly
-                return processCSVFile(csvPath);
+                try {
+                    // Download the document
+                    const buffer = await zk.downloadMediaMessage(quotedM);
+                    const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                    fs.writeFileSync(csvPath, buffer);
+                    
+                    // Process the CSV file directly
+                    return await processCSVFile(csvPath);
+                } catch (dlError) {
+                    console.error("Error downloading CSV:", dlError);
+                    // Try an alternative approach with a direct quoted message
+                    const directQuoted = await zk.downloadMediaMessage({
+                        message: contextInfo.quotedMessage,
+                        key: {
+                            remoteJid: dest,
+                            id: contextInfo.stanzaId
+                        }
+                    });
+                    
+                    const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                    fs.writeFileSync(csvPath, directQuoted);
+                    return await processCSVFile(csvPath);
+                }
             } catch (error) {
                 console.error("Error processing CSV from reply:", error);
-                await repondre("❌ Error processing the CSV file from your reply. Please try again.");
+                await repondre("❌ Error processing the CSV file from your reply. Please try again with direct upload.");
                 return;
             }
         } else {
@@ -310,12 +334,18 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
     try {
         // If we didn't already process a reply to a file, wait for the CSV file
         if (!(quotedMsg && quotedMsg.documentMessage)) {
-            await repondre("📋 *CSV Contact Processor*\nEither:\n1. Upload a contacts.csv file now, or\n2. Reply to an existing CSV file with .thecsv\n\n⏱️ Waiting for your CSV file... Please send it within 5 minutes.");
-            const csvPath = await waitForCSV();
-            await processCSVFile(csvPath);
+            await repondre("📋 *CSV Contact Processor*\n\n📤 Please upload your contacts.csv file now.\n\n⏱️ Waiting for your file... (5 minutes timeout)");
+            
+            try {
+                const csvPath = await waitForCSV();
+                await processCSVFile(csvPath);
+            } catch (waitError) {
+                console.error("Error while waiting for CSV:", waitError);
+                await repondre("⏱️ Time expired or error occurred. Please try uploading your CSV file again with `.thecsv` command.");
+            }
         }
     } catch (error) {
         console.error("Error in CSV command:", error);
-        await repondre("❌ An error occurred while waiting for or processing the CSV file. Please try again.");
+        await repondre("❌ An error occurred in the CSV processor. Please try again by sending `.thecsv` and then uploading your contacts.csv file.");
     }
 });
