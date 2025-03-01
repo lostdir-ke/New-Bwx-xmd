@@ -11,6 +11,12 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Create temp directory for downloads
+const tempDir = path.join(__dirname, '..', 'temp');
+if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+}
+
 adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest, zk, commandeOptions) => {
     const { ms, repondre, arg } = commandeOptions;
 
@@ -31,9 +37,22 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                     
                     // Check if it contains a document
                     if (documentMsg.message?.documentMessage) {
-                        // Using the correct method to download quoted media
-                        buffer = await zk.downloadAndSaveMediaMessage(documentMsg);
-                        fileName = documentMsg.message.documentMessage.fileName || 'file_' + Date.now() + '.csv';
+                        try {
+                            // Create a proper media message object
+                            const mediaMessage = {
+                                message: documentMsg.message,
+                                key: documentMsg.key,
+                                participant: documentMsg.participant
+                            };
+                            
+                            // First try with downloadAndSaveMediaMessage 
+                            const filePath = await zk.downloadAndSaveMediaMessage(mediaMessage, 'temp');
+                            buffer = fs.readFileSync(filePath);
+                            fileName = documentMsg.message.documentMessage.fileName || 'file_' + Date.now() + '.csv';
+                        } catch (downloadError) {
+                            console.error("Download error:", downloadError);
+                            throw new Error("Could not download the file. Please upload it directly.");
+                        }
                     } else {
                         throw new Error("No document found in the quoted message");
                     }
@@ -42,19 +61,28 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                     const context = ms.message.extendedTextMessage.contextInfo;
                     
                     if (context.quotedMessage?.documentMessage) {
-                        // Create proper message object for downloading
-                        const quotedMsg = {
-                            key: {
-                                remoteJid: dest,
-                                id: context.stanzaId,
-                                fromMe: context.participant === zk.user.id
-                            },
-                            message: context.quotedMessage
-                        };
-                        
-                        // Using the correct method
-                        buffer = await zk.downloadAndSaveMediaMessage(quotedMsg);
-                        fileName = context.quotedMessage.documentMessage.fileName || 'file_' + Date.now() + '.csv';
+                        try {
+                            // Create proper message object for downloading
+                            const quotedMsg = {
+                                key: {
+                                    remoteJid: dest,
+                                    id: context.stanzaId,
+                                    fromMe: context.participant === zk.user.id
+                                },
+                                message: {
+                                    documentMessage: context.quotedMessage.documentMessage
+                                },
+                                participant: context.participant || ''
+                            };
+                            
+                            // Using the correct method with a specific directory
+                            const filePath = await zk.downloadAndSaveMediaMessage(quotedMsg, 'temp');
+                            buffer = fs.readFileSync(filePath);
+                            fileName = context.quotedMessage.documentMessage.fileName || 'file_' + Date.now() + '.csv';
+                        } catch (downloadError) {
+                            console.error("Context download error:", downloadError);
+                            throw new Error("Could not download the file. Please upload it directly.");
+                        }
                     } else {
                         throw new Error("No document found in the context");
                     }
@@ -120,8 +148,16 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                     await repondre("📄 Downloading your file...");
                     
                     try {
+                        // Create a proper media message object
+                        const mediaMessage = {
+                            message: msg.message,
+                            key: msg.key,
+                            participant: msg.participant || ''
+                        };
+                        
                         // Download the file using the correct method
-                        const buffer = await zk.downloadAndSaveMediaMessage(msg);
+                        const filePath = await zk.downloadAndSaveMediaMessage(mediaMessage, 'temp');
+                        const buffer = fs.readFileSync(filePath);
                         
                         // Get file name or create one
                         let fileName = doc.fileName || 'file_' + Date.now() + '.csv';
