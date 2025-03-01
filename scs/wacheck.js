@@ -43,11 +43,21 @@ function saveContacts(whatsappUsers, nonWhatsappUsers) {
         const mergedNonWhatsappUsers = [...savedData.nonWhatsappUsers];
         const messageSentTo = savedData.messageSentTo || [];
         
+        // Track how many numbers were actually added vs skipped
+        let whatsappAdded = 0;
+        let whatsappSkipped = 0;
+        let nonWhatsappAdded = 0;
+        let nonWhatsappSkipped = 0;
+        
         // Add new WhatsApp users
         whatsappUsers.forEach(newUser => {
             const exists = mergedWhatsappUsers.some(user => user.phoneNumber === newUser.phoneNumber);
             if (!exists) {
                 mergedWhatsappUsers.push(newUser);
+                whatsappAdded++;
+            } else {
+                console.log(`Skipped saving duplicate WhatsApp number: ${newUser.phoneNumber}`);
+                whatsappSkipped++;
             }
         });
         
@@ -56,8 +66,20 @@ function saveContacts(whatsappUsers, nonWhatsappUsers) {
             const exists = mergedNonWhatsappUsers.some(user => user.phoneNumber === newUser.phoneNumber);
             if (!exists) {
                 mergedNonWhatsappUsers.push(newUser);
+                nonWhatsappAdded++;
+            } else {
+                console.log(`Skipped saving duplicate non-WhatsApp number: ${newUser.phoneNumber}`);
+                nonWhatsappSkipped++;
             }
         });
+        
+        // Log summary of additions
+        if (whatsappAdded > 0 || nonWhatsappAdded > 0) {
+            console.log(`Added ${whatsappAdded} new WhatsApp numbers and ${nonWhatsappAdded} new non-WhatsApp numbers`);
+        }
+        if (whatsappSkipped > 0 || nonWhatsappSkipped > 0) {
+            console.log(`Skipped ${whatsappSkipped} duplicate WhatsApp numbers and ${nonWhatsappSkipped} duplicate non-WhatsApp numbers`);
+        }
         
         // Save updated data
         fs.writeFileSync(contactsStoragePath, JSON.stringify({
