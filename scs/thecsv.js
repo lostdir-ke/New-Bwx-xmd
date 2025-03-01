@@ -39,55 +39,109 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
                     }
                 }
                 
-                // Get the quoted message (original message that was replied to)
-                const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
-                if (!contextInfo) {
-                    await repondre("❌ Could not access reply context information. Please try uploading the CSV directly.");
-                    return;
+                let buffer = null;
+                let csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                
+                // Try multiple methods to download the CSV file
+                // Method 1: Using quotedMessage directly
+                try {
+                    const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
+                    if (contextInfo && contextInfo.quotedMessage && contextInfo.quotedMessage.documentMessage) {
+                        const targetMsg = {
+                            key: {
+                                remoteJid: dest,
+                                fromMe: false,
+                                id: contextInfo.stanzaId,
+                                participant: contextInfo.participant || dest
+                            },
+                            message: contextInfo.quotedMessage
+                        };
+                        
+                        console.log("Method 1: Attempting to download with constructed message");
+                        buffer = await zk.downloadMediaMessage(targetMsg);
+                    }
+                } catch (err1) {
+                    console.log("Method 1 failed:", err1.message);
                 }
                 
-                // Get message ID
-                const messageId = contextInfo.stanzaId;
-                // Get the sender of the original message
-                const participant = contextInfo.participant || dest;
-                
-                // Try direct method first - get message by ID
-                try {
-                    // Construct a dummy message object that we can use to download
-                    const targetMsg = {
-                        key: {
-                            remoteJid: dest,
-                            fromMe: false,
-                            id: messageId,
-                            participant: participant
-                        },
-                        message: contextInfo.quotedMessage
-                    };
-                    
-                    console.log("Attempting to download with target message:", JSON.stringify(targetMsg, null, 2));
-                    
-                    // Try to download the file
-                    const buffer = await zk.downloadMediaMessage(targetMsg);
-                    
-                    if (!buffer || buffer.length === 0) {
-                        throw new Error("Downloaded buffer is empty");
+                // Method 2: Using messageID 
+                if (!buffer) {
+                    try {
+                        console.log("Method 2: Trying to load with message ID");
+                        const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
+                        if (contextInfo && contextInfo.stanzaId) {
+                            // Try to load the message by ID
+                            const msg = await zk.loadMessage(dest, contextInfo.stanzaId);
+                            if (msg) {
+                                buffer = await zk.downloadMediaMessage(msg);
+                            }
+                        }
+                    } catch (err2) {
+                        console.log("Method 2 failed:", err2.message);
                     }
-                    
-                    // Save the buffer to file
-                    const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                }
+                
+                // Method 3: Using quoted property
+                if (!buffer) {
+                    try {
+                        console.log("Method 3: Trying with quoted property");
+                        if (ms.quoted) {
+                            buffer = await zk.downloadMediaMessage(ms.quoted);
+                        }
+                    } catch (err3) {
+                        console.log("Method 3 failed:", err3.message);
+                    }
+                }
+                
+                // Method 4: Manual extraction from quoted message mime type
+                if (!buffer) {
+                    try {
+                        console.log("Method 4: Manual extraction from quoted message");
+                        const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
+                        if (contextInfo && contextInfo.quotedMessage) {
+                            const quotedMsg = contextInfo.quotedMessage;
+                            
+                            if (quotedMsg.documentMessage) {
+                                const fileData = quotedMsg.documentMessage;
+                                const url = fileData.url;
+                                
+                                if (url) {
+                                    // Try to fetch from URL if available
+                                    const fetchResponse = await fetch(url);
+                                    buffer = await fetchResponse.buffer();
+                                } else if (fileData.mediaKey) {
+                                    // If mediaKey is available, try to download with custom params
+                                    const customMsg = {
+                                        key: {
+                                            remoteJid: dest,
+                                            id: contextInfo.stanzaId
+                                        },
+                                        message: {
+                                            documentMessage: fileData
+                                        }
+                                    };
+                                    buffer = await zk.downloadMediaMessage(customMsg);
+                                }
+                            }
+                        }
+                    } catch (err4) {
+                        console.log("Method 4 failed:", err4.message);
+                    }
+                }
+                
+                // If we got a buffer, save and process it
+                if (buffer && buffer.length > 0) {
                     fs.writeFileSync(csvPath, buffer);
                     console.log("Successfully downloaded and saved CSV to:", csvPath);
-                    
-                    // Process the file
                     return await processCSVFile(csvPath);
-                } catch (downloadError) {
-                    console.error("Error downloading CSV file:", downloadError);
+                } else {
+                    console.error("All download methods failed");
                     
                     // Inform the user and ask for direct upload instead
-                    await repondre("❌ I couldn't download the CSV file from your reply. Please send the CSV file directly after sending `.thecsv` command.");
+                    await repondre("❌ Couldn't download the CSV file from your reply. Please forward the CSV file and try again, or send the CSV file directly.");
                     
                     // Wait for direct upload
-                    await repondre("📋 *CSV Contact Processor*\n\n📤 Please upload your contacts.csv file now.\n\n⏱️ Waiting for your file... (5 minutes timeout)");
+                    await repondre("📋 *CSV Contact Processor*\n\n📤 Please upload your contacts.csv file now, or forward it from another chat.\n\n⏱️ Waiting for your file... (5 minutes timeout)");
                     
                     try {
                         const csvPath = await waitForCSV();
@@ -100,7 +154,7 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
                 }
             } catch (error) {
                 console.error("Error processing CSV from reply:", error);
-                await repondre("❌ Error processing the CSV file from your reply. Please try again with direct upload.");
+                await repondre("❌ Error processing the CSV file. Please try one of these methods:\n\n1. Forward the CSV file then reply to it with `.thecsv`\n2. Send `.thecsv` command and then upload your CSV file directly");
                 return;
             }
         } else {
@@ -405,7 +459,7 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
     }
 });
 
-// Add helper function to get quoted message more reliably
+// Add helper functions to improve media handling
 zk.getQuotedMessage = async (message) => {
     try {
         const { quoted, msg } = message;
@@ -419,7 +473,8 @@ zk.getQuotedMessage = async (message) => {
             return {
                 key: {
                     remoteJid: message.key.remoteJid,
-                    id: context.stanzaId
+                    id: context.stanzaId,
+                    participant: context.participant
                 },
                 message: context.quotedMessage
             };
@@ -429,5 +484,28 @@ zk.getQuotedMessage = async (message) => {
     } catch (error) {
         console.error("Error getting quoted message:", error);
         throw error;
+    }
+};
+
+// Add this method to the zk object to help load messages by ID
+zk.loadMessage = async (jid, id) => {
+    try {
+        // Try using the built-in loadMessage if it exists
+        if (typeof zk.messageStore?.loadMessage === 'function') {
+            return await zk.messageStore.loadMessage(jid, id);
+        }
+        
+        // Fallback: Try to construct a message from the store
+        const msg = {
+            key: {
+                remoteJid: jid,
+                id: id
+            }
+        };
+        
+        return msg;
+    } catch (error) {
+        console.error("Error loading message:", error);
+        return null;
     }
 };
