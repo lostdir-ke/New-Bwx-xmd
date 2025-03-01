@@ -30,48 +30,74 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
             try {
                 await repondre("📄 CSV file detected in your reply! Processing contacts...");
                 
-                let buffer;
-                try {
-                    // Try to download the document directly from quoted message
-                    const quotedMsg = await zk.getQuotedMessage(ms);
-                    buffer = await zk.downloadMediaMessage(quotedMsg);
-                } catch (firstError) {
-                    console.log("Direct method failed, trying alternative:", firstError);
-                    
-                    try {
-                        // Get the contextInfo from the message
-                        const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
-                        if (!contextInfo) {
-                            await repondre("❌ Could not access the CSV file in your reply. Please try uploading it directly.");
-                            return;
-                        }
-                        
-                        // Try downloading using quoted message info
-                        buffer = await zk.downloadMediaMessage({
-                            message: contextInfo.quotedMessage,
-                            key: {
-                                remoteJid: dest,
-                                id: contextInfo.stanzaId
-                            }
-                        });
-                    } catch (secondError) {
-                        console.log("Second method failed, trying last resort:", secondError);
-                        
-                        // Last resort method
-                        buffer = await zk.downloadMediaMessage(ms);
+                // Log debugging information
+                console.log("Message type:", ms.message ? Object.keys(ms.message) : "No message");
+                if (ms.message?.extendedTextMessage?.contextInfo) {
+                    console.log("Context info available:", Object.keys(ms.message.extendedTextMessage.contextInfo));
+                    if (ms.message.extendedTextMessage.contextInfo.quotedMessage) {
+                        console.log("Quoted message type:", Object.keys(ms.message.extendedTextMessage.contextInfo.quotedMessage));
                     }
                 }
                 
-                if (!buffer) {
-                    await repondre("❌ Failed to download the CSV file. Please try uploading it directly.");
+                // Get the quoted message (original message that was replied to)
+                const contextInfo = ms.message?.extendedTextMessage?.contextInfo;
+                if (!contextInfo) {
+                    await repondre("❌ Could not access reply context information. Please try uploading the CSV directly.");
                     return;
                 }
                 
-                const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
-                fs.writeFileSync(csvPath, buffer);
+                // Get message ID
+                const messageId = contextInfo.stanzaId;
+                // Get the sender of the original message
+                const participant = contextInfo.participant || dest;
                 
-                // Process the CSV file
-                return await processCSVFile(csvPath);
+                // Try direct method first - get message by ID
+                try {
+                    // Construct a dummy message object that we can use to download
+                    const targetMsg = {
+                        key: {
+                            remoteJid: dest,
+                            fromMe: false,
+                            id: messageId,
+                            participant: participant
+                        },
+                        message: contextInfo.quotedMessage
+                    };
+                    
+                    console.log("Attempting to download with target message:", JSON.stringify(targetMsg, null, 2));
+                    
+                    // Try to download the file
+                    const buffer = await zk.downloadMediaMessage(targetMsg);
+                    
+                    if (!buffer || buffer.length === 0) {
+                        throw new Error("Downloaded buffer is empty");
+                    }
+                    
+                    // Save the buffer to file
+                    const csvPath = path.join(__dirname, '..', 'temp_contacts.csv');
+                    fs.writeFileSync(csvPath, buffer);
+                    console.log("Successfully downloaded and saved CSV to:", csvPath);
+                    
+                    // Process the file
+                    return await processCSVFile(csvPath);
+                } catch (downloadError) {
+                    console.error("Error downloading CSV file:", downloadError);
+                    
+                    // Inform the user and ask for direct upload instead
+                    await repondre("❌ I couldn't download the CSV file from your reply. Please send the CSV file directly after sending `.thecsv` command.");
+                    
+                    // Wait for direct upload
+                    await repondre("📋 *CSV Contact Processor*\n\n📤 Please upload your contacts.csv file now.\n\n⏱️ Waiting for your file... (5 minutes timeout)");
+                    
+                    try {
+                        const csvPath = await waitForCSV();
+                        return await processCSVFile(csvPath);
+                    } catch (waitError) {
+                        console.error("Error while waiting for CSV:", waitError);
+                        await repondre("⏱️ Time expired or error occurred. Please try again with the `.thecsv` command.");
+                        return;
+                    }
+                }
             } catch (error) {
                 console.error("Error processing CSV from reply:", error);
                 await repondre("❌ Error processing the CSV file from your reply. Please try again with direct upload.");
@@ -138,11 +164,23 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
             }, 60000); // After 1 minute remind user
             
             // Register the listener
-            zk.ev.on('messages.upsert', async ({ messages }) => {
+            // Register the listener for new messages
+            const messageHandler = async ({ messages }) => {
                 for (const m of messages) {
-                    await listener(m);
+                    try {
+                        await listener(m);
+                    } catch (err) {
+                        console.error("Error in message listener:", err);
+                    }
                 }
-            });
+            };
+            
+            zk.ev.on('messages.upsert', messageHandler);
+            
+            // Also clean up the handler when done
+            setTimeout(() => {
+                zk.ev.off('messages.upsert', messageHandler);
+            }, 300000); // 5 minutes timeout
         });
     };
     
@@ -153,6 +191,22 @@ adams({ nomCom: "thecsv", categorie: "General" }, async (dest, zk, commandeOptio
         const corruptedContacts = [];
         
         try {
+            console.log("Starting to process CSV file:", csvPath);
+            // Check if file exists and has content
+            if (!fs.existsSync(csvPath)) {
+                await repondre("❌ CSV file does not exist at path: " + csvPath);
+                return;
+            }
+            
+            const fileStats = fs.statSync(csvPath);
+            console.log("CSV file size:", fileStats.size, "bytes");
+            
+            if (fileStats.size === 0) {
+                await repondre("❌ CSV file is empty. Please try uploading a valid CSV file.");
+                return;
+            }
+            
+            await repondre("📊 Starting to process CSV file of size: " + fileStats.size + " bytes");
         
         // Read and parse CSV manually
         const fileContent = fs.readFileSync(csvPath, 'utf8');
