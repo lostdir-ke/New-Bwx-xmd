@@ -31,7 +31,8 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                     
                     // Check if it contains a document
                     if (documentMsg.message?.documentMessage) {
-                        buffer = await zk.downloadMediaMessage(documentMsg);
+                        // Using the correct method to download quoted media
+                        buffer = await zk.downloadAndSaveMediaMessage(documentMsg);
                         fileName = documentMsg.message.documentMessage.fileName || 'file_' + Date.now() + '.csv';
                     } else {
                         throw new Error("No document found in the quoted message");
@@ -41,17 +42,18 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                     const context = ms.message.extendedTextMessage.contextInfo;
                     
                     if (context.quotedMessage?.documentMessage) {
-                        // Download using context info
-                        buffer = await zk.downloadMediaMessage({
+                        // Create proper message object for downloading
+                        const quotedMsg = {
                             key: {
                                 remoteJid: dest,
                                 id: context.stanzaId,
                                 fromMe: context.participant === zk.user.id
                             },
-                            message: {
-                                documentMessage: context.quotedMessage.documentMessage
-                            }
-                        });
+                            message: context.quotedMessage
+                        };
+                        
+                        // Using the correct method
+                        buffer = await zk.downloadAndSaveMediaMessage(quotedMsg);
                         fileName = context.quotedMessage.documentMessage.fileName || 'file_' + Date.now() + '.csv';
                     } else {
                         throw new Error("No document found in the context");
@@ -118,8 +120,8 @@ adams({ nomCom: "csvfile", categorie: "General", reaction: "📊" }, async (dest
                     await repondre("📄 Downloading your file...");
                     
                     try {
-                        // Download the file
-                        const buffer = await zk.downloadMediaMessage(msg);
+                        // Download the file using the correct method
+                        const buffer = await zk.downloadAndSaveMediaMessage(msg);
                         
                         // Get file name or create one
                         let fileName = doc.fileName || 'file_' + Date.now() + '.csv';
