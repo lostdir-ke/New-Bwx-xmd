@@ -23,7 +23,8 @@ app.get('/', (req, res) => {
     botName: config.BOT || 'BMW_MD',
     ownerName: config.OWNER_NAME || 'Ibrahim Adams',
     uptime: getUptime(),
-    startTime: new Date().toLocaleString()
+    startTime: new Date().toLocaleString(),
+    botStatus: 'Online' // Add the missing botStatus variable
   });
 });
 
