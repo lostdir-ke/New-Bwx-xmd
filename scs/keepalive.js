@@ -19,13 +19,16 @@ const keepaliveStats = {
 // Function to ping the server and write to shell
 function pingServer() {
     try {
+        const port = process.env.PORT || 3000;
         // HTTP ping to webview
-        http.get(`http://0.0.0.0:${process.env.PORT || 3000}/ping`, (res) => {
+        http.get(`http://0.0.0.0:${port}/ping`, (res) => {
             keepaliveStats.pingCount++;
             keepaliveStats.lastPing = new Date();
             console.log(`[KeepAlive] HTTP Ping successful. Status: ${res.statusCode}`);
         }).on('error', (err) => {
             console.error('[KeepAlive] HTTP Ping failed:', err.message);
+            // Continue even if HTTP ping fails
+            keepaliveStats.status = 'Partial (Shell only)';
         });
         
         // Shell ping - execute a simple command to keep shell active
@@ -89,7 +92,7 @@ startKeepAlive();
 
 // Command to check and control the keepalive status
 adams({ nomCom: "keepalive", categorie: "General" }, async (dest, zk, commandeOptions) => {
-    const { repondre, arg } = commandeOptions;
+    const { repondre, arg = '' } = commandeOptions;
     
     try {
         // Parse arguments

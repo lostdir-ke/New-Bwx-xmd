@@ -30,6 +30,12 @@
             border-radius: 5px;
             margin: 20px 0;
         }
+        .shell-status {
+            padding: 15px;
+            background-color: #e3f2fd;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
         .ping-count {
             font-size: 24px;
             font-weight: bold;
@@ -39,20 +45,18 @@
             color: #666;
             font-size: 14px;
         }
-        .shell-status {
-            padding: 15px;
-            background-color: #e3f2fd;
-            border-radius: 5px;
-            margin: 20px 0;
-        }
         .refresh-btn {
             background-color: #4CAF50;
             color: white;
             border: none;
             padding: 10px 15px;
-            border-radius: 5px;
+            border-radius: 4px;
             cursor: pointer;
             font-size: 14px;
+            margin-top: 10px;
+        }
+        .refresh-btn:hover {
+            background-color: #388E3C;
         }
     </style>
 </head>
@@ -60,10 +64,10 @@
     <div class="container">
         <h1>BWM XMD KeepAlive System</h1>
         <div class="status">
+            <h3>HTTP Status</h3>
             <p>Status: <strong id="status">Active</strong></p>
-            <p>HTTP Ping Count: <span class="ping-count" id="pingCount">0</span></p>
+            <p>Ping Count: <span class="ping-count" id="pingCount">0</span></p>
             <p>Last Ping: <span class="time" id="lastPing">Never</span></p>
-            <p>Ping Interval: <span id="interval">5</span> minutes</p>
         </div>
         
         <div class="shell-status">
@@ -108,9 +112,7 @@
                         document.getElementById('pingCount').textContent = data.pingCount || pingCount;
                         document.getElementById('shellPings').textContent = data.shellPings || 0;
                         document.getElementById('lastPing').textContent = data.lastPing 
-                            ? new Date(data.lastPing).toLocaleString() 
-                            : now;
-                        document.getElementById('interval').textContent = data.interval || 5;
+                            ? new Date(data.lastPing).toLocaleString() : now;
                     }
                 })
                 .catch(error => {
@@ -118,11 +120,8 @@
                 });
         }
         
-        // Try to get stats on load
+        // Initial refresh
         refreshStats();
-        
-        // Set auto-refresh every minute
-        setInterval(refreshStats, 60000);
     </script>
 </body>
 </html>
