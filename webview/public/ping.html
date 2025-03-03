@@ -1,0 +1,77 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>KeepAlive Ping Endpoint</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .status {
+            padding: 15px;
+            background-color: #e8f5e9;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .ping-count {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2e7d32;
+        }
+        .time {
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BWM XMD KeepAlive System</h1>
+        <div class="status">
+            <p>Status: <strong>Active</strong></p>
+            <p>Ping Count: <span class="ping-count" id="pingCount">0</span></p>
+            <p>Last Ping: <span class="time" id="lastPing">Never</span></p>
+        </div>
+        <p>This is a system page that helps keep the bot running by periodically sending ping requests.</p>
+        <p>This endpoint is automatically pinged every 5 minutes to prevent the bot from going to sleep.</p>
+    </div>
+
+    <script>
+        // Load ping count from localStorage if available
+        let pingCount = localStorage.getItem('pingCount') ? parseInt(localStorage.getItem('pingCount')) : 0;
+        document.getElementById('pingCount').textContent = pingCount;
+        
+        // Set last ping time if available
+        const lastPing = localStorage.getItem('lastPing');
+        if (lastPing) {
+            document.getElementById('lastPing').textContent = lastPing;
+        }
+        
+        // Increment ping count and update time
+        pingCount++;
+        const now = new Date().toLocaleString();
+        localStorage.setItem('pingCount', pingCount.toString());
+        localStorage.setItem('lastPing', now);
+        
+        document.getElementById('pingCount').textContent = pingCount;
+        document.getElementById('lastPing').textContent = now;
+    </script>
+</body>
+</html>
