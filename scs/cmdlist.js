@@ -1,4 +1,3 @@
-
 'use strict';
 
 const { adams } = require(__dirname + "/../Ibrahim/adams");
@@ -8,16 +7,16 @@ const path = require('path');
 // Command to list all available commands with descriptions
 adams({ nomCom: "cmdlist", categorie: "General" }, async (dest, zk, commandeOptions) => {
     const { repondre, ms, arg } = commandeOptions;
-    
+
     try {
         // Load all command files from the scs directory
         const commandsDir = path.join(__dirname);
         const commandFiles = fs.readdirSync(commandsDir).filter(file => file.endsWith('.js') && file !== 'cmdlist.js');
-        
+
         // Organize commands by category
         const commandsByCategory = {};
         let totalCommands = 0;
-        
+
         // Command descriptions organized by category
         const descriptions = {
             "General": {
@@ -35,7 +34,8 @@ adams({ nomCom: "cmdlist", categorie: "General" }, async (dest, zk, commandeOpti
                 "ping": "Check if the bot is responsive",
                 "alive": "Check if the bot is running",
                 "keepalive": "Check the status of the bot's keepalive system",
-                "dev": "Contact information for bot developers"
+                "dev": "Contact information for bot developers",
+                "wavalidcsv": "Validate numbers from a CSV file URL and save WhatsApp users"
             },
             "Media": {
                 "sticker": "Convert image/video to sticker",
@@ -70,35 +70,35 @@ adams({ nomCom: "cmdlist", categorie: "General" }, async (dest, zk, commandeOpti
                 "tagall": "Tag all group members"
             }
         };
-        
+
         // Process each command file
         for (const file of commandFiles) {
             try {
                 // Load the file to extract command information
                 delete require.cache[require.resolve(path.join(commandsDir, file))];
                 const commandModule = require(path.join(commandsDir, file));
-                
+
                 // For files that use the adams module pattern
                 if (commandModule.cm && Array.isArray(commandModule.cm)) {
                     for (const cmd of commandModule.cm) {
                         if (cmd.nomCom) {
                             const category = cmd.categorie || "Uncategorized";
-                            
+
                             if (!commandsByCategory[category]) {
                                 commandsByCategory[category] = [];
                             }
-                            
+
                             // Check if we have a description for this command
                             let description = "No description available";
                             if (descriptions[category] && descriptions[category][cmd.nomCom]) {
                                 description = descriptions[category][cmd.nomCom];
                             }
-                            
+
                             commandsByCategory[category].push({
                                 name: cmd.nomCom,
                                 description: description
                             });
-                            
+
                             totalCommands++;
                         }
                     }
@@ -107,17 +107,17 @@ adams({ nomCom: "cmdlist", categorie: "General" }, async (dest, zk, commandeOpti
                 console.error(`Error processing command file ${file}:`, error);
             }
         }
-        
+
         // Add the command definitions we have from our descriptions
         for (const category in descriptions) {
             if (!commandsByCategory[category]) {
                 commandsByCategory[category] = [];
             }
-            
+
             for (const cmdName in descriptions[category]) {
                 // Check if command already exists in our list
                 const exists = commandsByCategory[category].some(cmd => cmd.name === cmdName);
-                
+
                 if (!exists) {
                     commandsByCategory[category].push({
                         name: cmdName,
@@ -127,46 +127,46 @@ adams({ nomCom: "cmdlist", categorie: "General" }, async (dest, zk, commandeOpti
                 }
             }
         }
-        
+
         // Generate the command list message
         let commandsList = `📋 *BWM XMD COMMAND LIST*\n\n`;
         commandsList += `*Total Commands:* ${totalCommands}\n\n`;
-        
+
         // Get specific category if requested
         if (arg && arg.length > 0) {
             const requestedCategory = arg.join(' ');
             for (const category in commandsByCategory) {
                 if (category.toLowerCase() === requestedCategory.toLowerCase()) {
                     commandsList = `📋 *${category} Commands*\n\n`;
-                    
+
                     // Sort commands alphabetically
                     const sortedCommands = commandsByCategory[category].sort((a, b) => 
                         a.name.localeCompare(b.name));
-                    
+
                     sortedCommands.forEach((cmd, index) => {
                         commandsList += `${index + 1}. *.${cmd.name}*\n   ↪ ${cmd.description}\n\n`;
                     });
-                    
+
                     return repondre(commandsList);
                 }
             }
-            
+
             // If category not found
             return repondre(`❌ Category "${requestedCategory}" not found.\n\nAvailable categories: ${Object.keys(commandsByCategory).join(', ')}`);
         }
-        
+
         // List all categories
         commandsList += `*Available Categories:*\n`;
         for (const category in commandsByCategory) {
             const count = commandsByCategory[category].length;
             commandsList += `• *${category}* (${count} commands)\n`;
         }
-        
+
         commandsList += `\n*Usage:*\n`;
         commandsList += `• Type *.cmdlist* to see all categories\n`;
         commandsList += `• Type *.cmdlist [category]* to see commands in a specific category\n`;
         commandsList += `• Type *.help [command]* for detailed help on a specific command\n`;
-        
+
         // Send the command list
         repondre(commandsList);
     } catch (error) {
@@ -178,13 +178,13 @@ adams({ nomCom: "cmdlist", categorie: "General" }, async (dest, zk, commandeOpti
 // Help command to get detailed information about a specific command
 adams({ nomCom: "help", categorie: "General" }, async (dest, zk, commandeOptions) => {
     const { repondre, arg } = commandeOptions;
-    
+
     if (!arg || arg.length === 0) {
         return repondre("Please specify a command to get help for.\n\nExample: *.help wacheck*\n\nOr use *.cmdlist* to see all available commands.");
     }
-    
+
     const commandName = arg[0].toLowerCase().replace(/^\./, ''); // Remove leading dot if present
-    
+
     // Command help information
     const helpInfo = {
         "wacheck": {
@@ -245,23 +245,31 @@ adams({ nomCom: "help", categorie: "General" }, async (dest, zk, commandeOptions
                 "*.cmdlist*",
                 "*.cmdlist General*"
             ]
+        },
+        "wavalidcsv": {
+            usage: "*.wavalidcsv [url_to_csv_file]*",
+            description: "Downloads a CSV file from the provided URL, extracts phone numbers, validates them against WhatsApp, and saves the registered ones.",
+            examples: [
+                "*.wavalidcsv https://example.com/contacts.csv*"
+            ]
         }
+
     };
-    
+
     // Check if we have help info for the requested command
     if (helpInfo[commandName]) {
         const info = helpInfo[commandName];
         let helpMessage = `📖 *Help: ${commandName}*\n\n`;
         helpMessage += `*Description:*\n${info.description}\n\n`;
         helpMessage += `*Usage:*\n${info.usage}\n\n`;
-        
+
         if (info.examples && info.examples.length > 0) {
             helpMessage += `*Examples:*\n`;
             info.examples.forEach(example => {
                 helpMessage += `${example}\n\n`;
             });
         }
-        
+
         return repondre(helpMessage);
     } else {
         return repondre(`❌ Help information for "${commandName}" is not available.\n\nUse *.cmdlist* to see all available commands.`);
