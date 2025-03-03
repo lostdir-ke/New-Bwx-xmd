@@ -59,6 +59,26 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Webview running on port ${PORT}`);
 });
 
+// Setup keepalive status endpoint
+app.get('/keepalive-status', (req, res) => {
+  try {
+    // Import the keepalive stats
+    const { keepaliveStats } = require('./scs/keepalive');
+    
+    // Add uptime info
+    const uptime = getUptime();
+    const stats = {
+      ...keepaliveStats,
+      uptime: uptime
+    };
+    
+    res.json(stats);
+  } catch (error) {
+    console.error('Error serving keepalive status:', error);
+    res.status(500).json({ error: 'Failed to retrieve keepalive status' });
+  }
+});
+
 // Setup keepalive system
 function setupKeepAlive() {
   // Self-ping every 5 minutes to keep the repl alive

@@ -24,6 +24,7 @@ function pingServer() {
         http.get(`http://0.0.0.0:${port}/ping`, (res) => {
             keepaliveStats.pingCount++;
             keepaliveStats.lastPing = new Date();
+            keepaliveStats.status = 'Active';
             console.log(`[KeepAlive] HTTP Ping successful. Status: ${res.statusCode}`);
         }).on('error', (err) => {
             console.error('[KeepAlive] HTTP Ping failed:', err.message);
@@ -92,7 +93,8 @@ startKeepAlive();
 
 // Command to check and control the keepalive status
 adams({ nomCom: "keepalive", categorie: "General" }, async (dest, zk, commandeOptions) => {
-    const { repondre, arg = '' } = commandeOptions;
+    const { repondre } = commandeOptions;
+    const arg = commandeOptions.arg || '';
     
     try {
         // Parse arguments
