@@ -30,12 +30,6 @@
             border-radius: 5px;
             margin: 20px 0;
         }
-        .shell-status {
-            padding: 15px;
-            background-color: #e3f2fd;
-            border-radius: 5px;
-            margin: 20px 0;
-        }
         .ping-count {
             font-size: 24px;
             font-weight: bold;
@@ -45,41 +39,18 @@
             color: #666;
             font-size: 14px;
         }
-        .refresh-btn {
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-top: 10px;
-        }
-        .refresh-btn:hover {
-            background-color: #388E3C;
-        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>BWM XMD KeepAlive System</h1>
         <div class="status">
-            <h3>HTTP Status</h3>
-            <p>Status: <strong id="status">Active</strong></p>
+            <p>Status: <strong>Active</strong></p>
             <p>Ping Count: <span class="ping-count" id="pingCount">0</span></p>
             <p>Last Ping: <span class="time" id="lastPing">Never</span></p>
         </div>
-        
-        <div class="shell-status">
-            <h3>Shell Status</h3>
-            <p>Shell Ping Count: <span class="ping-count" id="shellPings">0</span></p>
-            <p>Log: <code>.keepalive.log</code> file in root directory</p>
-        </div>
-        
-        <p>This system keeps the bot running by periodically sending ping requests to both HTTP and shell.</p>
-        <p>Commands: <code>.keepalive</code>, <code>.keepalive start [minutes]</code>, <code>.keepalive stop</code></p>
-        
-        <button class="refresh-btn" onclick="refreshStats()">Refresh Status</button>
+        <p>This is a system page that helps keep the bot running by periodically sending ping requests.</p>
+        <p>This endpoint is automatically pinged every 5 minutes to prevent the bot from going to sleep.</p>
     </div>
 
     <script>
@@ -101,27 +72,6 @@
         
         document.getElementById('pingCount').textContent = pingCount;
         document.getElementById('lastPing').textContent = now;
-        
-        // Function to refresh stats from server
-        function refreshStats() {
-            fetch('/keepalive-status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data) {
-                        document.getElementById('status').textContent = data.status || 'Active';
-                        document.getElementById('pingCount').textContent = data.pingCount || pingCount;
-                        document.getElementById('shellPings').textContent = data.shellPings || 0;
-                        document.getElementById('lastPing').textContent = data.lastPing 
-                            ? new Date(data.lastPing).toLocaleString() : now;
-                    }
-                })
-                .catch(error => {
-                    console.error('Error fetching stats:', error);
-                });
-        }
-        
-        // Initial refresh
-        refreshStats();
     </script>
 </body>
 </html>
