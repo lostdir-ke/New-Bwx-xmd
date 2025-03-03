@@ -18,6 +18,9 @@ adams({ nomCom: "wacmds", categorie: "General" }, async (dest, zk, commandeOptio
         "wabroadcastresume": "Resume an interrupted broadcasting process",
         "wastop": "Stop an ongoing broadcast process",
         "wabroadcastinfo": "Show statistics and estimated time for broadcast",
+        "keepalive": "Check the status of the bot's keepalive system",
+        "keepaliveurl": "Get the URL for external monitoring services to ping",
+        "weburl": "Get the URL of the bot's web dashboard",
         "wacmds": "Show this list of WhatsApp-related commands"
     };
     

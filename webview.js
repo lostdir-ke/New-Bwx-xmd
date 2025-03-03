@@ -60,11 +60,21 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Webview running on port ${PORT}`);
 });
 
+// Track keepalive statistics
+const keepaliveStats = {
+  status: 'Active',
+  pingCount: 0,
+  lastPing: null,
+  startTime: new Date()
+};
+
 // Setup keepalive system
 function setupKeepAlive() {
   // Self-ping every 5 minutes to keep the repl alive
   setInterval(() => {
     http.get(`http://0.0.0.0:${PORT}/ping`, (res) => {
+      keepaliveStats.pingCount++;
+      keepaliveStats.lastPing = new Date();
       console.log(`[KeepAlive] Pinged server. Status: ${res.statusCode}`);
     }).on('error', (err) => {
       console.error('[KeepAlive] Ping failed:', err.message);
@@ -77,4 +87,4 @@ function setupKeepAlive() {
 // Activate keepalive system
 setupKeepAlive();
 
-module.exports = { server };
+module.exports = { server, keepaliveStats };
