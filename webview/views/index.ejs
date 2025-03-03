@@ -1,0 +1,63 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= botName %> - Status Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1><%= botName %> Dashboard</h1>
+      <p>Created by <%= ownerName %></p>
+    </div>
+    
+    <div class="status-card">
+      <div class="status-indicator <%= botStatus.toLowerCase() %>"></div>
+      <h2>Bot Status: <%= botStatus %></h2>
+      <p>Running since: <span id="uptime"></span></p>
+    </div>
+    
+    <div class="features">
+      <h2>Bot Features</h2>
+      <ul>
+        <li>WhatsApp Group Management</li>
+        <li>Anti-Bot Protection</li>
+        <li>Anti-Link Protection</li>
+        <li>Welcome Messages</li>
+        <li>Level & Rank System</li>
+        <li>Sticker Commands</li>
+        <li>And much more...</li>
+      </ul>
+    </div>
+    
+    <div class="footer">
+      <p>&copy; <%= new Date().getFullYear() %> <%= ownerName %> - All Rights Reserved</p>
+    </div>
+  </div>
+
+  <script>
+    // Calculate and display uptime
+    const startTime = new Date("<%= startTime %>");
+    
+    function updateUptime() {
+      const now = new Date();
+      const diff = now - startTime;
+      
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+      
+      document.getElementById('uptime').textContent = 
+        `${days}d ${hours}h ${minutes}m ${seconds}s`;
+    }
+    
+    // Update the uptime every second
+    updateUptime();
+    setInterval(updateUptime, 1000);
+  </script>
+</body>
+</html>
