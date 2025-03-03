@@ -21,7 +21,7 @@ adams({ nomCom: "wacmds", categorie: "General" }, async (dest, zk, commandeOptio
         "keepaliveurl": "Get the URL for external monitoring services to ping",
         "weburl": "Get the URL of the bot's web dashboard",
         "wacmds": "Show this list of WhatsApp-related commands",
-        "wavalidcsv": "Validate numbers from a CSV file URL and save WhatsApp users"
+        "wavalidcsv": "Validate numbers from a CSV file URL and save WhatsApp users for broadcasting"
     };
 
     // Build the formatted response
