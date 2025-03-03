@@ -63,14 +63,40 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 function setupKeepAlive() {
   // Self-ping every 5 minutes to keep the repl alive
   setInterval(() => {
+    // HTTP ping
     http.get(`http://0.0.0.0:${PORT}/ping`, (res) => {
       console.log(`[KeepAlive] Pinged server. Status: ${res.statusCode}`);
+      
+      // Update ping.html stats via API
+      try {
+        const stats = require('./scs/keepalive').keepaliveStats;
+        global.keepaliveData = {
+          pingCount: stats.pingCount,
+          lastPing: stats.lastPing,
+          shellPings: stats.shellPings,
+          status: stats.status,
+          interval: stats.interval
+        };
+      } catch (err) {
+        console.error('[KeepAlive] Error updating stats:', err.message);
+      }
     }).on('error', (err) => {
       console.error('[KeepAlive] Ping failed:', err.message);
     });
   }, 5 * 60 * 1000); // 5 minutes
 
-  console.log('[KeepAlive] System activated. Pinging every 5 minutes.');
+  // Create a status endpoint for the keepalive system
+  app.get('/keepalive-status', (req, res) => {
+    res.json(global.keepaliveData || {
+      status: 'Active',
+      pingCount: 0,
+      lastPing: new Date(),
+      shellPings: 0,
+      interval: 5
+    });
+  });
+
+  console.log('[KeepAlive] Webview system activated. Pinging every 5 minutes.');
 }
 
 // Activate keepalive system
