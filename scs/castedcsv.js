@@ -13,12 +13,67 @@ if (!fs.existsSync(castedContactsPath)) {
     fs.writeFileSync(castedContactsPath, 'Name,Phone Number,WhatsApp Status,Message Sent\n');
 }
 
+// Function to check if a phone number already exists in CSV
+function phoneNumberExistsInCSV(phoneNumber) {
+    try {
+        if (!fs.existsSync(castedContactsPath)) {
+            return false;
+        }
+        
+        const data = fs.readFileSync(castedContactsPath, 'utf8');
+        const lines = data.split('\n').filter(line => line.trim() !== '');
+        
+        // Skip header row (first line)
+        for (let i = 1; i < lines.length; i++) {
+            const columns = lines[i].split(',');
+            if (columns.length >= 2 && columns[1] === phoneNumber) {
+                return true;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('Error checking phone number existence:', error);
+        return false;
+    }
+}
+
 // Function to add contact to the CSV
 function addContactToCSV(name, phoneNumber, whatsappStatus, messageSent = false) {
     try {
-        const newContact = `"${name.replace(/"/g, '""')}",${phoneNumber},${whatsappStatus ? 'Registered' : 'Not Registered'},${messageSent ? 'Yes' : 'No'}\n`;
-        fs.appendFileSync(castedContactsPath, newContact);
-        return true;
+        // Check if the phone number already exists
+        if (phoneNumberExistsInCSV(phoneNumber)) {
+            // If exists, update the entry instead of adding a new one
+            const data = fs.readFileSync(castedContactsPath, 'utf8');
+            const lines = data.split('\n');
+            let found = false;
+            
+            for (let i = 1; i < lines.length; i++) {
+                if (lines[i].trim() === '') continue;
+                
+                const columns = lines[i].split(',');
+                if (columns.length >= 2 && columns[1] === phoneNumber) {
+                    // Update the existing entry
+                    const parts = [
+                        `"${name.replace(/"/g, '""')}"`,
+                        phoneNumber,
+                        whatsappStatus ? 'Registered' : 'Not Registered',
+                        messageSent ? 'Yes' : 'No'
+                    ];
+                    lines[i] = parts.join(',');
+                    found = true;
+                    break;
+                }
+            }
+            
+            fs.writeFileSync(castedContactsPath, lines.join('\n'));
+            return found;
+        } else {
+            // Add new contact entry
+            const newContact = `"${name.replace(/"/g, '""')}",${phoneNumber},${whatsappStatus ? 'Registered' : 'Not Registered'},${messageSent ? 'Yes' : 'No'}\n`;
+            fs.appendFileSync(castedContactsPath, newContact);
+            return true;
+        }
     } catch (error) {
         console.error('Error adding contact to CSV:', error);
         return false;
@@ -41,6 +96,31 @@ function getContactCount() {
         return 0;
     }
 }
+
+// Function to check if number was already processed by other commands (wabroadcast, etc.)
+function wasNumberAlreadyProcessed(phoneNumber) {
+    try {
+        // Check in the main WhatsApp contacts storage
+        const whatsappContactsPath = path.join(__dirname, '../xmd/saved_whatsapp_contacts.json');
+        if (fs.existsSync(whatsappContactsPath)) {
+            const whatsappData = JSON.parse(fs.readFileSync(whatsappContactsPath, 'utf8'));
+            if (whatsappData && whatsappData.messageSentTo && 
+                Array.isArray(whatsappData.messageSentTo) && 
+                whatsappData.messageSentTo.includes(phoneNumber)) {
+                return true;
+            }
+        }
+        
+        // You could add more checks here for other storage mechanisms
+        
+        return false;
+    } catch (error) {
+        console.error('Error checking if number was processed elsewhere:', error);
+        return false; // On error, assume not processed to be safe
+    }
+}
+
+
 
 // Function to extract phone number from JID
 function extractPhoneNumber(jid) {
@@ -152,6 +232,25 @@ adams({ nomCom: "castedcsv", categorie: "General" }, async (dest, zk, commandeOp
             const [result] = await zk.onWhatsApp(phoneNumber + '@s.whatsapp.net');
             
             if (result && result.exists) {
+                // Check if this user already exists and has been messaged
+                const existingData = fs.readFileSync(castedContactsPath, 'utf8');
+                const lines = existingData.split('\n');
+                let alreadyMessaged = false;
+                
+                for (let i = 1; i < lines.length; i++) {
+                    if (lines[i].trim() === '') continue;
+                    
+                    const cols = lines[i].split(',');
+                    if (cols.length >= 4 && cols[1] === phoneNumber && cols[3] === 'Yes') {
+                        alreadyMessaged = true;
+                        break;
+                    }
+                }
+                
+                if (alreadyMessaged) {
+                    return repondre(`📊 *Contact Processing*\n\n• Name: *${name}*\n• Number: *${phoneNumber}*\n• WhatsApp Status: *Registered*\n• Message: *Already Sent Previously*\n\nContact already exists in database!`);
+                }
+                
                 // Save as WhatsApp user
                 addContactToCSV(name, phoneNumber, true);
                 
@@ -225,8 +324,11 @@ adams({ nomCom: "castbroadcast", categorie: "General" }, async (dest, zk, comman
                 const isWhatsApp = columns[2] === 'Registered';
                 const isMessaged = columns[3] === 'Yes';
                 
+                // Double check if this number has already been messaged in any other list
+                const alreadyMessagedElsewhere = wasNumberAlreadyProcessed(phoneNumber);
+                
                 // Only process WhatsApp contacts that haven't been messaged
-                if (isWhatsApp && !isMessaged) {
+                if (isWhatsApp && !isMessaged && !alreadyMessagedElsewhere) {
                     pendingCount++;
                     
                     try {

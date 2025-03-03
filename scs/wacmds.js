@@ -22,7 +22,10 @@ adams({ nomCom: "wacmds", categorie: "General" }, async (dest, zk, commandeOptio
         "weburl": "Get the URL of the bot's web dashboard",
         "wacmds": "Show this list of WhatsApp-related commands",
         "wavalidcsv": "Validate numbers from a CSV file URL and save WhatsApp users for broadcasting",
-        "castedcsv": "Process contact cards, check WhatsApp registration status, send messages, and save contact information to a CSV file."
+        "castedcsv": "Process contact cards, check WhatsApp registration status, send messages, and save contact information to a CSV file",
+        "castbroadcast": "Send messages to contacts saved in the casted.csv file who haven't been messaged yet",
+        "castclear": "Delete all contacts in the casted.csv database and start fresh",
+        "castexport": "Export the casted.csv contacts database as a file"
     };
 
     // Build the formatted response
