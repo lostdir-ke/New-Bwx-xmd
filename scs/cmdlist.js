@@ -33,9 +33,6 @@ adams({ nomCom: "cmdlist", categorie: "General" }, async (dest, zk, commandeOpti
                 "help": "Get help information about available commands",
                 "menu": "Display the main menu with all commands",
                 "ping": "Check if the bot is responsive",
-
-                "keepalive": "Prevent the bot from sleeping (keeps Repl alive 24/7)",
-
                 "alive": "Check if the bot is running",
                 "dev": "Contact information for bot developers"
             },
