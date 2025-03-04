@@ -1,0 +1,14 @@
+{
+  "isActive": false,
+  "contactsToCheck": [
+    {
+      "name": "wacheck , lichuna senior,0112981172",
+      "phoneNumber": "254"
+    }
+  ],
+  "currentIndex": 0,
+  "totalContacts": 1,
+  "command": "wacheck",
+  "url": "",
+  "lastActive": "2025-03-03T05:42:44.729Z"
+}
